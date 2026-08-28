@@ -1,24 +1,25 @@
+require('dotenv').config();
+
 const express = require('express');
+const { Sequelize, DataTypes } = require('sequelize');
+const algorithmModel = require('./models/algorithm');
+const createAlgorithmRepository = require('./models/algorithmRepository');
 
 const app = express();
 const port = process.env.PORT || 3000;
+const sequelize = new Sequelize(process.env.DATABASE_URL, {
+    dialect: process.env.DB_DIALECT || 'postgres'
+});
+const Algorithm = algorithmModel(sequelize, DataTypes);
+const {
+    findAll,
+    findById,
+    create,
+    update,
+    remove
+} = createAlgorithmRepository(Algorithm);
 
 app.use(express.json());
-
-let algorithms = [
-    {
-        id: 1,
-        name: 'BFS',
-        type: 'graph',
-        description: 'Обход графа в ширину'
-    },
-    {
-        id: 2,
-        name: 'Quick Sort',
-        type: 'sorting',
-        description: 'Быстрая сортировка массива'
-    }
-];
 
 const parseId = (value) => {
     const id = Number(value);
@@ -50,18 +51,24 @@ const validateAlgorithm = (data) => {
     return null;
 };
 
-app.get('/algorithms', (req, res) => {
-    res.json(algorithms);
+const algorithmData = (data) => ({
+    name: data.name.trim(),
+    type: data.type.trim(),
+    description: data.description.trim()
 });
 
-app.get('/algorithms/:id', (req, res) => {
+app.get('/algorithms', async (req, res) => {
+    res.json(await findAll());
+});
+
+app.get('/algorithms/:id', async (req, res) => {
     const id = parseId(req.params.id);
 
     if (id === null) {
         return res.status(400).json({ error: 'Некорректный ID алгоритма' });
     }
 
-    const algorithm = algorithms.find((item) => item.id === id);
+    const algorithm = await findById(id);
 
     if (!algorithm) {
         return res.status(404).json({ error: 'Алгоритм не найден' });
@@ -70,25 +77,17 @@ app.get('/algorithms/:id', (req, res) => {
     res.json(algorithm);
 });
 
-app.post('/algorithms', (req, res) => {
+app.post('/algorithms', async (req, res) => {
     const validationError = validateAlgorithm(req.body);
 
     if (validationError) {
         return res.status(400).json({ error: validationError });
     }
 
-    const algorithm = {
-        id: algorithms.length ? Math.max(...algorithms.map((item) => item.id)) + 1 : 1,
-        name: req.body.name.trim(),
-        type: req.body.type.trim(),
-        description: req.body.description.trim()
-    };
-
-    algorithms.push(algorithm);
-    res.status(201).json(algorithm);
+    res.status(201).json(await create(algorithmData(req.body)));
 });
 
-app.put('/algorithms/:id', (req, res) => {
+app.put('/algorithms/:id', async (req, res) => {
     const id = parseId(req.params.id);
 
     if (id === null) {
@@ -101,36 +100,26 @@ app.put('/algorithms/:id', (req, res) => {
         return res.status(400).json({ error: validationError });
     }
 
-    const algorithmIndex = algorithms.findIndex((item) => item.id === id);
+    const algorithm = await update(id, algorithmData(req.body));
 
-    if (algorithmIndex === -1) {
+    if (!algorithm) {
         return res.status(404).json({ error: 'Алгоритм не найден' });
     }
 
-    algorithms[algorithmIndex] = {
-        id,
-        name: req.body.name.trim(),
-        type: req.body.type.trim(),
-        description: req.body.description.trim()
-    };
-
-    res.json(algorithms[algorithmIndex]);
+    res.json(algorithm);
 });
 
-app.delete('/algorithms/:id', (req, res) => {
+app.delete('/algorithms/:id', async (req, res) => {
     const id = parseId(req.params.id);
 
     if (id === null) {
         return res.status(400).json({ error: 'Некорректный ID алгоритма' });
     }
 
-    const algorithmIndex = algorithms.findIndex((item) => item.id === id);
-
-    if (algorithmIndex === -1) {
+    if (!await remove(id)) {
         return res.status(404).json({ error: 'Алгоритм не найден' });
     }
 
-    algorithms.splice(algorithmIndex, 1);
     res.status(204).send();
 });
 

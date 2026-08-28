@@ -1,6 +1,6 @@
 {
   "development": {
-    "DATABASE_URL": "postgresql://admin_user:passwordForAdmin@localhost:5432/algorithms",
+    "use_env_variable": "DATABASE_URL",
     "dialect": "postgres"
   },
   "test": {
