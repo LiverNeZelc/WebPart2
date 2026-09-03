@@ -3,7 +3,9 @@ require('dotenv').config();
 const express = require('express');
 const { Sequelize, DataTypes } = require('sequelize');
 const algorithmModel = require('./models/algorithm');
+const userModel = require('./models/user');
 const createAlgorithmRepository = require('./models/algorithmRepository');
+const createAuth = require('./auth');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -11,13 +13,15 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
     dialect: process.env.DB_DIALECT || 'postgres'
 });
 const Algorithm = algorithmModel(sequelize, DataTypes);
+const User = userModel(sequelize, DataTypes);
 const {
     findAll,
-    findById,
+    findByOwnerId,
     create,
     update,
     remove
 } = createAlgorithmRepository(Algorithm);
+const { router: authRouter, authenticate } = createAuth(User);
 
 app.use(express.json());
 
@@ -57,37 +61,33 @@ const algorithmData = (data) => ({
     description: data.description.trim()
 });
 
+app.use('/auth', authRouter);
+
 app.get('/algorithms', async (req, res) => {
     res.json(await findAll());
 });
 
-app.get('/algorithms/:id', async (req, res) => {
-    const id = parseId(req.params.id);
+app.get('/algorithms/:ownerId', authenticate, async (req, res) => {
+    const ownerId = parseId(req.params.ownerId);
 
-    if (id === null) {
-        return res.status(400).json({ error: 'Некорректный ID алгоритма' });
+    if (ownerId === null) {
+        return res.status(400).json({ error: 'Некорректный ID владельца алгоритмов' });
     }
 
-    const algorithm = await findById(id);
-
-    if (!algorithm) {
-        return res.status(404).json({ error: 'Алгоритм не найден' });
-    }
-
-    res.json(algorithm);
+    res.json(await findByOwnerId(ownerId));
 });
 
-app.post('/algorithms', async (req, res) => {
+app.post('/algorithms', authenticate, async (req, res) => {
     const validationError = validateAlgorithm(req.body);
 
     if (validationError) {
         return res.status(400).json({ error: validationError });
     }
 
-    res.status(201).json(await create(algorithmData(req.body)));
+    res.status(201).json(await create({ ...algorithmData(req.body), owner_id: req.user.userId }));
 });
 
-app.put('/algorithms/:id', async (req, res) => {
+app.put('/algorithms/:id', authenticate, async (req, res) => {
     const id = parseId(req.params.id);
 
     if (id === null) {
@@ -109,7 +109,7 @@ app.put('/algorithms/:id', async (req, res) => {
     res.json(algorithm);
 });
 
-app.delete('/algorithms/:id', async (req, res) => {
+app.delete('/algorithms/:id', authenticate, async (req, res) => {
     const id = parseId(req.params.id);
 
     if (id === null) {

@@ -18,6 +18,10 @@ module.exports = (sequelize, DataTypes) => {
         description: {
             type: DataTypes.TEXT,
             allowNull: false
+        },
+        owner_id: {
+            type: DataTypes.INTEGER,
+            allowNull: true
         }
     }, {
         tableName: 'algorithms'

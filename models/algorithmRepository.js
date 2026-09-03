@@ -2,7 +2,10 @@
 
 module.exports = (Algorithm) => ({
     findAll: () => Algorithm.findAll({ order: [['id', 'ASC']] }),
-    findById: (id) => Algorithm.findByPk(id),
+    findByOwnerId: (ownerId) => Algorithm.findAll({
+        where: { owner_id: ownerId },
+        order: [['id', 'ASC']]
+    }),
     create: (data) => Algorithm.create(data),
     update: async (id, data) => {
         const algorithm = await Algorithm.findByPk(id);
