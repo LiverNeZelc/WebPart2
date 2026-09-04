@@ -1,0 +1,12 @@
+<%- include('partials/header') %>
+<a class="back-link" href="/?auth=1">&larr; Вернуться к списку</a>
+<article class="detail-card">
+    <span class="tag"><%= item.type %></span>
+    <h1><%= item.name %></h1>
+    <p class="detail-description"><%= item.description %></p>
+    <dl class="metadata">
+        <div><dt>Идентификатор</dt><dd><%= item.id %></dd></div>
+        <div><dt>Источник данных</dt><dd>Массив в памяти</dd></div>
+    </dl>
+</article>
+<%- include('partials/footer') %>

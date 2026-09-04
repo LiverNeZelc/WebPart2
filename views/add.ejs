@@ -1,0 +1,19 @@
+<%- include('partials/header') %>
+<section class="form-header">
+    <p class="eyebrow">Новый элемент</p>
+    <h1>Добавить алгоритм</h1>
+    <p>Заполните форму, и новый алгоритм появится в общем списке.</p>
+</section>
+<form class="algorithm-form" method="post" action="/add?auth=1">
+    <label for="name">Название
+        <input id="name" name="name" type="text" required placeholder="Например, Алгоритм Дейкстры">
+    </label>
+    <label for="type">Тип
+        <input id="type" name="type" type="text" required placeholder="Например, Графы">
+    </label>
+    <label for="description">Описание
+        <textarea id="description" name="description" rows="5" required placeholder="Кратко опишите назначение алгоритма"></textarea>
+    </label>
+    <button type="submit">Добавить алгоритм</button>
+</form>
+<%- include('partials/footer') %>
