@@ -100,6 +100,16 @@ app.put('/algorithms/:id', authenticate, async (req, res) => {
         return res.status(400).json({ error: validationError });
     }
 
+    const existingAlgorithm = await Algorithm.findByPk(id);
+
+    if (!existingAlgorithm) {
+        return res.status(404).json({ error: 'Алгоритм не найден' });
+    }
+
+    if (existingAlgorithm.owner_id !== req.user.userId) {
+        return res.status(403).json({ error: 'Изменять алгоритм может только его создатель' });
+    }
+
     const algorithm = await update(id, algorithmData(req.body));
 
     if (!algorithm) {
@@ -114,6 +124,16 @@ app.delete('/algorithms/:id', authenticate, async (req, res) => {
 
     if (id === null) {
         return res.status(400).json({ error: 'Некорректный ID алгоритма' });
+    }
+
+    const algorithm = await Algorithm.findByPk(id);
+
+    if (!algorithm) {
+        return res.status(404).json({ error: 'Алгоритм не найден' });
+    }
+
+    if (algorithm.owner_id !== req.user.userId) {
+        return res.status(403).json({ error: 'Удалять алгоритм может только его создатель' });
     }
 
     if (!await remove(id)) {
