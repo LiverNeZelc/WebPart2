@@ -5,15 +5,22 @@
     <p>Заполните форму, и новый алгоритм появится в общем списке.</p>
 </section>
 <form class="algorithm-form" method="post" action="/add?auth=1">
+    <% if (error) { %>
+        <p class="form-error" role="alert"><%= error %></p>
+    <% } %>
     <label for="name">Название
-        <input id="name" name="name" type="text" required placeholder="Например, Алгоритм Дейкстры">
+           <input id="name" name="name" type="text" required minlength="2" maxlength="80" aria-describedby="name-count" value="<%= values.name %>" placeholder="Например, Алгоритм Дейкстры">
+           <small class="character-count" id="name-count" data-character-count="name">0 / 80</small>
     </label>
     <label for="type">Тип
-        <input id="type" name="type" type="text" required placeholder="Например, Графы">
+           <input id="type" name="type" type="text" required minlength="2" maxlength="40" aria-describedby="type-count" value="<%= values.type %>" placeholder="Например, Графы">
+           <small class="character-count" id="type-count" data-character-count="type">0 / 40</small>
     </label>
     <label for="description">Описание
-        <textarea id="description" name="description" rows="5" required placeholder="Кратко опишите назначение алгоритма"></textarea>
+           <textarea id="description" name="description" rows="5" required minlength="5" maxlength="500" aria-describedby="description-count" placeholder="Кратко опишите назначение алгоритма"><%= values.description %></textarea>
+           <small class="character-count" id="description-count" data-character-count="description">0 / 500</small>
     </label>
     <button type="submit">Добавить алгоритм</button>
 </form>
+    <script src="/app.js" defer></script>
 <%- include('partials/footer') %>

@@ -9,6 +9,16 @@ module.exports = (User) => {
     const jwtSecret = process.env.JWT_SECRET || 'development-secret';
     const accessTokenExpiresIn = process.env.ACCESS_TOKEN_EXPIRES_IN || '15m';
     const refreshTokenExpiresIn = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
+    const isRequestObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+    const isValidUsername = (value) => typeof value === 'string'
+        && value.trim().length >= 3
+        && value.trim().length <= 32
+        && /^[\p{L}\p{N}._-]+$/u.test(value.trim());
+    const isValidPassword = (value, minimumLength = 1) => typeof value === 'string'
+        && value.trim().length > 0
+        && value.length >= minimumLength
+        && value.length <= 128
+        && !/[\u0000-\u001F\u007F]/.test(value);
 
     const createTokens = (userId) => ({
         accessToken: jwt.sign({ userId }, jwtSecret, { expiresIn: accessTokenExpiresIn }),
@@ -36,12 +46,15 @@ module.exports = (User) => {
     };
 
     router.post('/register', async (req, res) => {
-        const { username, password } = req.body || {};
+        if (!isRequestObject(req.body)) {
+            return res.status(400).json({ error: 'Тело запроса должно быть объектом' });
+        }
 
-        if (typeof username !== 'string' || username.trim() === ''
-            || typeof password !== 'string' || password.length < 6) {
+        const { username, password } = req.body;
+
+        if (!isValidUsername(username) || !isValidPassword(password, 8)) {
             return res.status(400).json({
-                error: 'Поля username и password обязательны, пароль должен содержать минимум 6 символов'
+                error: 'Имя пользователя должно содержать 3–32 допустимых символа, пароль — 8–128 символов'
             });
         }
 
@@ -62,12 +75,19 @@ module.exports = (User) => {
     });
 
     router.post('/login', async (req, res) => {
-        const { username, password } = req.body || {};
-        const user = typeof username === 'string'
-            ? await User.findOne({ where: { username: username.trim() } })
-            : null;
+        if (!isRequestObject(req.body)) {
+            return res.status(400).json({ error: 'Тело запроса должно быть объектом' });
+        }
 
-        if (!user || typeof password !== 'string' || !await bcrypt.compare(password, user.password)) {
+        const { username, password } = req.body;
+
+        if (!isValidUsername(username) || !isValidPassword(password)) {
+            return res.status(400).json({ error: 'Некорректное имя пользователя или пароль' });
+        }
+
+        const user = await User.findOne({ where: { username: username.trim() } });
+
+        if (!user || !await bcrypt.compare(password, user.password)) {
             return res.status(401).json({ error: 'Неверное имя пользователя или пароль' });
         }
 
@@ -77,10 +97,15 @@ module.exports = (User) => {
     });
 
     router.post('/refresh', async (req, res) => {
-        const { refreshToken } = req.body || {};
+        if (!isRequestObject(req.body)) {
+            return res.status(400).json({ error: 'Тело запроса должно быть объектом' });
+        }
 
-        if (typeof refreshToken !== 'string') {
-            return res.status(400).json({ error: 'Поле refreshToken обязательно' });
+        const { refreshToken } = req.body;
+
+        if (typeof refreshToken !== 'string' || refreshToken.length === 0 || refreshToken.length > 4096
+            || /[\u0000-\u0020\u007F]/.test(refreshToken)) {
+            return res.status(400).json({ error: 'Некорректное поле refreshToken' });
         }
 
         let payload;
@@ -91,7 +116,7 @@ module.exports = (User) => {
             return res.status(401).json({ error: 'Недействительный или истёкший refresh-токен' });
         }
 
-        if (payload.type !== 'refresh') {
+        if (!payload || typeof payload !== 'object' || payload.type !== 'refresh') {
             return res.status(401).json({ error: 'Недействительный refresh-токен' });
         }
 

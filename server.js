@@ -13,6 +13,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 const logsDirectory = path.join(__dirname, 'logs');
 const requestLogPath = path.join(logsDirectory, 'requests.log');
+const algorithmLimits = { name: 80, type: 40, description: 500 };
 
 fs.mkdirSync(logsDirectory, { recursive: true });
 const demoItems = [
@@ -29,6 +30,7 @@ const demoItems = [
         description: 'Поиск элемента в отсортированном массиве за логарифмическое время.'
     }
 ];
+let nextDemoItemId = demoItems.reduce((maxId, item) => Math.max(maxId, item.id), 0) + 1;
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
     dialect: process.env.DB_DIALECT || 'postgres'
 });
@@ -50,9 +52,10 @@ app.use((req, res, next) => {
     const startedAt = Date.now();
 
     res.on('finish', () => {
-        const logEntry = `${new Date().toISOString()} ${req.method} ${req.originalUrl} `
+        const logEntry = `${new Date().toISOString()} ${req.method} ${req.path} `
             + `${res.statusCode} - ${Date.now() - startedAt} ms\n`;
 
+        console.log(logEntry.trimEnd());
         fs.appendFile(requestLogPath, logEntry, (error) => {
             if (error) {
                 console.error('Не удалось записать лог запроса:', error);
@@ -63,8 +66,8 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '16kb' }));
+app.use(express.urlencoded({ extended: false, limit: '16kb', parameterLimit: 20 }));
 app.use(express.static('public', { index: false }));
 
 const demoAuth = (req, res, next) => {
@@ -79,7 +82,7 @@ const demoAuth = (req, res, next) => {
 const parseId = (value) => {
     const id = Number(value);
 
-    if (!Number.isInteger(id) || id < 1) {
+    if (!Number.isSafeInteger(id) || id < 1) {
         return null;
     }
 
@@ -91,16 +94,35 @@ const validateAlgorithm = (data) => {
         return 'Тело запроса должно быть объектом';
     }
 
-    if (typeof data.name !== 'string' || data.name.trim() === '') {
-        return 'Поле name обязательно и должно быть непустой строкой';
-    }
+    const fields = [
+        { key: 'name', label: 'Название', min: 2, max: algorithmLimits.name },
+        { key: 'type', label: 'Тип', min: 2, max: algorithmLimits.type },
+        { key: 'description', label: 'Описание', min: 5, max: algorithmLimits.description, multiline: true }
+    ];
 
-    if (typeof data.type !== 'string' || data.type.trim() === '') {
-        return 'Поле type обязательно и должно быть непустой строкой';
-    }
+    for (const field of fields) {
+        const value = data[field.key];
+        const forbiddenControls = field.multiline
+            ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/
+            : /[\u0000-\u001F\u007F]/;
 
-    if (typeof data.description !== 'string' || data.description.trim() === '') {
-        return 'Поле description обязательно и должно быть непустой строкой';
+        if (typeof value !== 'string') {
+            return `Поле «${field.label}» должно быть строкой`;
+        }
+
+        const normalized = value.trim();
+
+        if (normalized.length < field.min) {
+            return `Поле «${field.label}» не может быть пустым; длина должна быть не меньше ${field.min}`;
+        }
+
+        if (normalized.length > field.max) {
+            return `Поле «${field.label}» не должно превышать ${field.max} символов`;
+        }
+
+        if (forbiddenControls.test(value)) {
+            return `Поле «${field.label}» содержит недопустимые управляющие символы`;
+        }
     }
 
     return null;
@@ -118,11 +140,16 @@ app.get('/login', (req, res) => {
     res.render('login', { title: 'Авторизация' });
 });
 
+app.get('/test-500', (req, res, next) => {
+    next(new Error('Искусственно вызванная ошибка для проверки страницы 500'));
+});
+
 app.get('/', demoAuth, (req, res) => {
     res.render('index', {
         title: 'Алгоритмы',
         items: demoItems,
-        user: req.user
+        user: req.user,
+        added: req.query.added === '1'
     });
 });
 
@@ -137,24 +164,41 @@ app.get('/item/:id', demoAuth, (req, res, next) => {
 });
 
 app.get('/add', demoAuth, (req, res) => {
-    res.render('add', { title: 'Добавить алгоритм', user: req.user });
+    res.render('add', {
+        title: 'Добавить алгоритм',
+        user: req.user,
+        error: null,
+        values: { name: '', type: '', description: '' }
+    });
 });
 
-app.post('/add', demoAuth, (req, res, next) => {
-    const { name, type, description } = req.body;
+app.post('/add', demoAuth, (req, res) => {
+    const validationError = validateAlgorithm(req.body);
 
-    if ([name, type, description].some((value) => typeof value !== 'string' || value.trim() === '')) {
-        return next(new Error('Все поля формы обязательны'));
+    if (validationError) {
+        return res.status(400).render('add', {
+            title: 'Добавить алгоритм',
+            user: req.user,
+            error: validationError,
+            values: {
+                name: typeof req.body?.name === 'string' ? req.body.name.slice(0, 80) : '',
+                type: typeof req.body?.type === 'string' ? req.body.type.slice(0, 40) : '',
+                description: typeof req.body?.description === 'string'
+                    ? req.body.description.slice(0, 500)
+                    : ''
+            }
+        });
     }
 
+    const { name, type, description } = algorithmData(req.body);
     demoItems.push({
-        id: demoItems.length ? Math.max(...demoItems.map((item) => item.id)) + 1 : 1,
-        name: name.trim(),
-        type: type.trim(),
-        description: description.trim()
+        id: nextDemoItemId++,
+        name,
+        type,
+        description
     });
 
-    return res.redirect('/?auth=1');
+    return res.redirect('/?auth=1&added=1');
 });
 
 app.get('/algorithms', async (req, res) => {
@@ -227,7 +271,15 @@ app.use((req, res) => {
 
 app.use((error, req, res, next) => {
     if (error instanceof SyntaxError && error.status === 400 && error.body) {
-        return res.status(400).json({ error: 'Некорректный JSON' });
+        return req.path.startsWith('/algorithms') || req.path.startsWith('/auth')
+            ? res.status(400).json({ error: 'Некорректный JSON' })
+            : res.status(400).send('Некорректный запрос');
+    }
+
+    if (error.status === 413 || error.type === 'entity.too.large') {
+        return req.path.startsWith('/algorithms') || req.path.startsWith('/auth')
+            ? res.status(413).json({ error: 'Размер запроса превышает допустимый лимит' })
+            : res.status(413).send('Размер запроса превышает допустимый лимит');
     }
 
     next(error);
