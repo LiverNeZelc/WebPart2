@@ -1,208 +1,273 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { authenticate, clearSession, createAlgorithm, deleteAlgorithm, getSession, listAlgorithms, updateAlgorithm } from './api.js'
+import AlgorithmForm from './components/AlgorithmForm.jsx'
+import AlgorithmList from './components/AlgorithmList.jsx'
+import AuthForm from './components/AuthForm.jsx'
+import AlgorithmDetails from './components/AlgorithmDetails.jsx'
 import './App.css'
 
-const storageKey = 'algorithm-visualizer-items'
-
-const initialAlgorithms = [
-  {
-    id: 1,
-    name: 'Бинарный поиск',
-    type: 'Поиск',
-    description: 'Быстрый поиск элемента в отсортированном массиве.',
-  },
-  {
-    id: 2,
-    name: 'Сортировка слиянием',
-    type: 'Сортировка',
-    description: 'Стабильная сортировка с асимптотикой O(n log n).',
-  },
-]
-
 function App() {
-  const [algorithms, setAlgorithms] = useState(() => {
-    try {
-      const saved = localStorage.getItem(storageKey)
-      return saved ? JSON.parse(saved) : initialAlgorithms
-    } catch {
-      return initialAlgorithms
-    }
-  })
-  const [name, setName] = useState('')
-  const [type, setType] = useState('Поиск')
-  const [description, setDescription] = useState('')
+  const [session, setSession] = useState(null)
+  const [restoringSession, setRestoringSession] = useState(true)
+  const [algorithms, setAlgorithms] = useState([])
+  const [selectedId, setSelectedId] = useState(null)
   const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
   const [sortOrder, setSortOrder] = useState('name')
-  const [editingId, setEditingId] = useState(null)
-  const [selectedId, setSelectedId] = useState(1)
-  const [saveState, setSaveState] = useState('Состояние загружено')
+  const [loading, setLoading] = useState(false)
+  const [reloadCount, setReloadCount] = useState(0)
+  const [loadError, setLoadError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [authError, setAuthError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [editingAlgorithm, setEditingAlgorithm] = useState(null)
 
   useEffect(() => {
-    document.title = `Визуализатор алгоритмов · ${algorithms.length}`
+    let active = true
+
+    const restore = async () => {
+      try {
+        const savedSession = getSession()
+        if (savedSession && active) setSession(savedSession)
+      } catch (error) {
+        if (active) setAuthError(error.message)
+      } finally {
+        if (active) setRestoringSession(false)
+      }
+    }
+
+    restore()
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 350)
+    return () => clearTimeout(timer)
+  }, [query])
+
+  useEffect(() => {
+    let active = true
+
+    const load = async () => {
+      if (!session) {
+        setAlgorithms([])
+        setSelectedId(null)
+        return
+      }
+
+      setLoading(true)
+      setLoadError('')
+      try {
+        const items = await listAlgorithms(session.user.id, debouncedQuery)
+        if (!active) return
+        setAlgorithms(items)
+        setSelectedId((currentId) =>
+          items.some((item) => item.id === currentId) ? currentId : (items[0]?.id ?? null),
+        )
+      } catch (error) {
+        if (active) setLoadError(error.message)
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+
+    load()
+    return () => { active = false }
+  }, [session, debouncedQuery, reloadCount])
+
+  useEffect(() => {
+    document.title = `Библиотека алгоритмов · ${algorithms.length}`
   }, [algorithms.length])
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      localStorage.setItem(storageKey, JSON.stringify(algorithms))
-      setSaveState('Автосохранено')
-    }, 500)
+  const visibleAlgorithms = useMemo(() => [...algorithms].sort((first, second) => (
+    sortOrder === 'type'
+      ? first.type.localeCompare(second.type, 'ru')
+      : first.name.localeCompare(second.name, 'ru')
+  )), [algorithms, sortOrder])
 
-    return () => clearTimeout(timer)
-  }, [algorithms])
+  const selectedAlgorithm = algorithms.find((item) => item.id === selectedId) ?? null
 
-  const visibleAlgorithms = algorithms
-    .filter((algorithm) =>
-      `${algorithm.name} ${algorithm.type} ${algorithm.description}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-    )
-    .sort((first, second) => {
-      if (sortOrder === 'type') return first.type.localeCompare(second.type)
-      return first.name.localeCompare(second.name)
-    })
-
-  const selectedAlgorithm =
-    algorithms.find((algorithm) => algorithm.id === selectedId) || algorithms[0]
-
-  const resetForm = () => {
-    setName('')
-    setType('Поиск')
-    setDescription('')
-    setEditingId(null)
+  const handleAuthentication = async (credentials, mode) => {
+    setAuthError('')
+    try {
+      const nextSession = await authenticate(credentials, mode)
+      setSession(nextSession)
+      setQuery('')
+      setDebouncedQuery('')
+      setNotice(`Вы вошли как ${nextSession.user.username}`)
+    } catch (error) {
+      setAuthError(error.message)
+    }
   }
 
-  const handleSubmit = (event) => {
-    event.preventDefault()
-    if (!name.trim() || !description.trim()) return
+  const handleLogout = () => {
+    clearSession()
+    setSession(null)
+    setAlgorithms([])
+    setSelectedId(null)
+    setEditingAlgorithm(null)
+    setNotice('Вы вышли из аккаунта')
+  }
 
-    if (editingId) {
-      setAlgorithms((current) =>
-        current.map((algorithm) =>
-          algorithm.id === editingId
-            ? { ...algorithm, name: name.trim(), type, description: description.trim() }
-            : algorithm,
-        ),
-      )
-    } else {
-      const newAlgorithm = {
-        id: Date.now(),
-        name: name.trim(),
-        type,
-        description: description.trim(),
+  const handleSave = async (values) => {
+    setSaving(true)
+    setNotice('')
+
+    if (editingAlgorithm) {
+      const original = editingAlgorithm
+      const optimistic = { ...original, ...values }
+      setAlgorithms((items) => items.map((item) => item.id === original.id ? optimistic : item))
+
+      try {
+        const updated = await updateAlgorithm(original.id, values)
+        setAlgorithms((items) => items.map((item) => item.id === original.id ? updated : item))
+        setEditingAlgorithm(null)
+        setNotice('Изменения сохранены')
+        return true
+      } catch (error) {
+        setAlgorithms((items) => items.map((item) => item.id === original.id ? original : item))
+        setNotice(error.message)
+        return false
+      } finally {
+        setSaving(false)
+        setReloadCount((count) => count + 1)
       }
-      setAlgorithms((current) => [...current, newAlgorithm])
-      setSelectedId(newAlgorithm.id)
     }
 
-    setSaveState('Изменения ожидают сохранения')
-    resetForm()
-  }
+    const temporaryId = -Date.now()
+    const temporaryItem = { id: temporaryId, ...values }
+    setAlgorithms((items) => [...items, temporaryItem])
+    setSelectedId(temporaryId)
 
-  const editAlgorithm = (algorithm) => {
-    setEditingId(algorithm.id)
-    setName(algorithm.name)
-    setType(algorithm.type)
-    setDescription(algorithm.description)
-  }
-
-  const removeAlgorithm = (id) => {
-    setAlgorithms((current) => current.filter((algorithm) => algorithm.id !== id))
-    if (selectedId === id) {
-      setSelectedId(algorithms.find((item) => item.id !== id)?.id)
+    try {
+      const created = await createAlgorithm(values)
+      setAlgorithms((items) => items.map((item) => item.id === temporaryId ? created : item))
+      setSelectedId(created.id)
+      setNotice('Алгоритм добавлен')
+      return true
+    } catch (error) {
+      setAlgorithms((items) => items.filter((item) => item.id !== temporaryId))
+      setSelectedId((currentId) => currentId === temporaryId ? (algorithms[0]?.id ?? null) : currentId)
+      setNotice(error.message)
+      return false
+    } finally {
+      setSaving(false)
+      setReloadCount((count) => count + 1)
     }
   }
 
-  const bars = selectedAlgorithm
-    ? Array.from({ length: 10 }, (_, index) => ((index * 17 + selectedAlgorithm.id) % 75) + 25)
-    : []
+  const handleDelete = async (algorithm) => {
+    const index = algorithms.findIndex((item) => item.id === algorithm.id)
+    const nextSelection = algorithms[index + 1] ?? algorithms[index - 1] ?? null
+    setAlgorithms((items) => items.filter((item) => item.id !== algorithm.id))
+    if (selectedId === algorithm.id) setSelectedId(nextSelection?.id ?? null)
+    setNotice('')
+
+    try {
+      await deleteAlgorithm(algorithm.id)
+      setNotice('Алгоритм удалён')
+    } catch (error) {
+      setAlgorithms((items) => {
+        const restored = [...items]
+        restored.splice(Math.min(index, restored.length), 0, algorithm)
+        return restored
+      })
+      if (selectedId === algorithm.id) setSelectedId(algorithm.id)
+      setNotice(error.message)
+    } finally {
+      setReloadCount((count) => count + 1)
+    }
+  }
+
+  const handleAuthExpired = useCallback(() => {
+    setSession(null)
+    setAlgorithms([])
+    setSelectedId(null)
+    setAuthError('Срок действия сеанса истёк. Войдите снова.')
+  }, [])
+
+  useEffect(() => {
+    window.addEventListener('auth:expired', handleAuthExpired)
+    return () => window.removeEventListener('auth:expired', handleAuthExpired)
+  }, [handleAuthExpired])
+
+  if (restoringSession) {
+    return <main className="app-shell"><p className="page-message" role="status">Проверяем сеанс...</p></main>
+  }
 
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand-mark">AV</div>
+        <div className="brand-mark" aria-hidden="true">AL</div>
         <div>
-          <h1>Визуализатор алгоритмов</h1>
+          <p className="eyebrow">Лабораторная работа 5</p>
+          <h1>Библиотека алгоритмов</h1>
         </div>
-        <span className="save-status">● {saveState}</span>
+        {session && (
+          <div className="account-actions">
+            <span>{session.user.username}</span>
+            <button type="button" className="text-button" onClick={handleLogout}>Выйти</button>
+          </div>
+        )}
       </header>
 
-      <section className="workspace">
-        <aside className="sidebar">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Библиотека</p>
-              <h2>Алгоритмы</h2>
-            </div>
-            <span className="count-badge">{algorithms.length}</span>
-          </div>
-
-          <label className="search-field">
-            <span>Поиск</span>
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название или тип" />
-          </label>
-
-          <label className="sort-field">
-            <span>Сортировка</span>
-            <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)}>
-              <option value="name">По названию</option>
-              <option value="type">По типу</option>
-            </select>
-          </label>
-
-          <div className="algorithm-list">
-            {visibleAlgorithms.map((algorithm) => (
-              <article
-                className={`algorithm-item ${selectedId === algorithm.id ? 'active' : ''}`}
-                key={algorithm.id}
-                onClick={() => setSelectedId(algorithm.id)}
-              >
-                <div className="item-topline">
-                  <strong>{algorithm.name}</strong>
-                  <span>{algorithm.type}</span>
-                </div>
-                <p>{algorithm.description}</p>
-                <div className="item-actions">
-                  <button type="button" onClick={(event) => { event.stopPropagation(); editAlgorithm(algorithm) }}>Изменить</button>
-                  <button type="button" className="danger" onClick={(event) => { event.stopPropagation(); removeAlgorithm(algorithm.id) }}>Удалить</button>
-                </div>
-              </article>
-            ))}
-            {!visibleAlgorithms.length && <p className="empty-state">Ничего не найдено</p>}
-          </div>
-        </aside>
-
-        <section className="content-area">
-          <div className="visualizer-panel">
-            <div className="panel-heading">
+      {!session ? (
+        <AuthForm onSubmit={handleAuthentication} error={authError} />
+      ) : (
+        <section className="workspace">
+          <aside className="sidebar">
+            <div className="section-heading">
               <div>
-                <p className="eyebrow">Демонстрация</p>
-                <h2>{selectedAlgorithm?.name || 'Выберите алгоритм'}</h2>
+                <p className="eyebrow">Ваш каталог</p>
+                <h2>Алгоритмы</h2>
               </div>
-              <span className="type-label">{selectedAlgorithm?.type || 'Нет данных'}</span>
+              <span className="count-badge">{algorithms.length}</span>
             </div>
-            <p className="description">{selectedAlgorithm?.description || 'Добавьте первый алгоритм через форму ниже.'}</p>
-            <div className="visualizer" aria-label="Визуализация массива">
-              {bars.map((height, index) => <div className="bar" style={{ height: `${height}%` }} key={index}><span>{index + 1}</span></div>)}
-            </div>
-            <div className="visualizer-footer"><span>Массив данных</span><span>10 элементов · готово к запуску</span></div>
-          </div>
 
-          <form className="algorithm-form" onSubmit={handleSubmit}>
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Управление списком</p>
-                <h2>{editingId ? 'Редактировать алгоритм' : 'Добавить алгоритм'}</h2>
-              </div>
-              {editingId && <button type="button" className="text-button" onClick={resetForm}>Отменить</button>}
-            </div>
-            <div className="form-grid">
-              <label><span>Название</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Например, Быстрая сортировка" required /></label>
-              <label><span>Тип</span><select value={type} onChange={(event) => setType(event.target.value)}><option>Поиск</option><option>Сортировка</option><option>Графы</option><option>Другое</option></select></label>
-              <label className="wide"><span>Описание</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Коротко опишите принцип работы" rows="3" required /></label>
-            </div>
-            <button className="primary-button" type="submit">{editingId ? 'Сохранить изменения' : 'Добавить в библиотеку'}</button>
-          </form>
+            <label className="search-field">
+              <span>Поиск по каталогу</span>
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value.slice(0, 100))}
+                maxLength={100}
+                placeholder="Название, тип или описание"
+              />
+            </label>
+
+            <label className="sort-field">
+              <span>Сортировка результатов</span>
+              <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)}>
+                <option value="name">По названию</option>
+                <option value="type">По типу</option>
+              </select>
+            </label>
+
+            <AlgorithmList
+              algorithms={visibleAlgorithms}
+              selectedId={selectedId}
+              loading={loading}
+              error={loadError}
+              onSelect={setSelectedId}
+              onEdit={setEditingAlgorithm}
+              onDelete={handleDelete}
+              onRetry={() => setReloadCount((count) => count + 1)}
+              disabled={saving}
+            />
+          </aside>
+
+          <section className="content-area">
+            {notice && <p className="notice" role="status">{notice}</p>}
+            <AlgorithmDetails algorithm={selectedAlgorithm} />
+            <AlgorithmForm
+              key={editingAlgorithm?.id ?? 'new'}
+              algorithm={editingAlgorithm}
+              onSubmit={handleSave}
+              onCancel={() => setEditingAlgorithm(null)}
+              saving={saving}
+            />
+          </section>
         </section>
-      </section>
+      )}
     </main>
   )
 }

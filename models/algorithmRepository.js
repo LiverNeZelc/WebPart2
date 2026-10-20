@@ -1,9 +1,25 @@
 'use strict';
 
-module.exports = (Algorithm) => ({
+module.exports = (Algorithm, Op) => ({
     findAll: () => Algorithm.findAll({ order: [['id', 'ASC']] }),
-    findByOwnerId: (ownerId) => Algorithm.findAll({
-        where: { owner_id: ownerId },
+    findByOwnerId: (ownerId, search = '') => Algorithm.findAll({
+        where: {
+            [Op.and]: [
+                {
+                    [Op.or]: [
+                        { owner_id: ownerId },
+                        { owner_id: null }
+                    ]
+                },
+                ...(search ? [{
+                    [Op.or]: [
+                        { name: { [Op.iLike]: `%${search}%` } },
+                        { type: { [Op.iLike]: `%${search}%` } },
+                        { description: { [Op.iLike]: `%${search}%` } }
+                    ]
+                }] : [])
+            ]
+        },
         order: [['id', 'ASC']]
     }),
     create: (data) => Algorithm.create(data),

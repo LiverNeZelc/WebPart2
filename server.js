@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 const express = require('express');
-const { Sequelize, DataTypes } = require('sequelize');
+const { Sequelize, DataTypes, Op } = require('sequelize');
 const algorithmModel = require('./models/algorithm');
 const userModel = require('./models/user');
 const createAlgorithmRepository = require('./models/algorithmRepository');
@@ -15,15 +15,14 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
 const Algorithm = algorithmModel(sequelize, DataTypes);
 const User = userModel(sequelize, DataTypes);
 const {
-    findAll,
     findByOwnerId,
     create,
     update,
     remove
-} = createAlgorithmRepository(Algorithm);
+} = createAlgorithmRepository(Algorithm, Op);
 const { router: authRouter, authenticate } = createAuth(User);
 
-app.use(express.json());
+app.use(express.json({ limit: '16kb' }));
 
 const parseId = (value) => {
     const id = Number(value);
@@ -41,15 +40,27 @@ const validateAlgorithm = (data) => {
     }
 
     if (typeof data.name !== 'string' || data.name.trim() === '') {
-        return 'Поле name обязательно и должно быть непустой строкой';
+        return 'Название обязательно и не может состоять только из пробелов';
+    }
+
+    if (data.name.trim().length > 100) {
+        return 'Название не должно превышать 100 символов';
     }
 
     if (typeof data.type !== 'string' || data.type.trim() === '') {
-        return 'Поле type обязательно и должно быть непустой строкой';
+        return 'Тип обязателен и не может состоять только из пробелов';
+    }
+
+    if (data.type.trim().length > 50) {
+        return 'Тип не должен превышать 50 символов';
     }
 
     if (typeof data.description !== 'string' || data.description.trim() === '') {
-        return 'Поле description обязательно и должно быть непустой строкой';
+        return 'Описание обязательно и не может состоять только из пробелов';
+    }
+
+    if (data.description.trim().length > 1000) {
+        return 'Описание не должно превышать 1000 символов';
     }
 
     return null;
@@ -63,8 +74,12 @@ const algorithmData = (data) => ({
 
 app.use('/auth', authRouter);
 
-app.get('/algorithms', async (req, res) => {
-    res.json(await findAll());
+app.get('/algorithms', authenticate, async (req, res) => {
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    if (search.length > 100) {
+        return res.status(400).json({ error: 'Поисковый запрос не должен превышать 100 символов' });
+    }
+    res.json(await findByOwnerId(req.user.userId, search));
 });
 
 app.get('/algorithms/:ownerId', authenticate, async (req, res) => {
@@ -74,7 +89,15 @@ app.get('/algorithms/:ownerId', authenticate, async (req, res) => {
         return res.status(400).json({ error: 'Некорректный ID владельца алгоритмов' });
     }
 
-    res.json(await findByOwnerId(ownerId));
+    if (ownerId !== req.user.userId) {
+        return res.status(403).json({ error: 'Просматривать можно только свой каталог' });
+    }
+
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    if (search.length > 100) {
+        return res.status(400).json({ error: 'Поисковый запрос не должен превышать 100 символов' });
+    }
+    res.json(await findByOwnerId(ownerId, search));
 });
 
 app.post('/algorithms', authenticate, async (req, res) => {
@@ -150,6 +173,10 @@ app.use((req, res) => {
 app.use((error, req, res, next) => {
     if (error instanceof SyntaxError && error.status === 400 && error.body) {
         return res.status(400).json({ error: 'Некорректный JSON' });
+    }
+
+    if (error.type === 'entity.too.large') {
+        return res.status(413).json({ error: 'Размер запроса превышает допустимый предел 16 КБ' });
     }
 
     next(error);

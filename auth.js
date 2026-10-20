@@ -39,9 +39,11 @@ module.exports = (User) => {
         const { username, password } = req.body || {};
 
         if (typeof username !== 'string' || username.trim() === ''
-            || typeof password !== 'string' || password.length < 6) {
+            || username.trim().length < 3 || username.trim().length > 32
+            || typeof password !== 'string' || password.trim() === ''
+            || password.length < 6 || Buffer.byteLength(password, 'utf8') > 72) {
             return res.status(400).json({
-                error: 'Поля username и password обязательны, пароль должен содержать минимум 6 символов'
+                error: 'Имя пользователя должно содержать 3–32 символа, пароль — минимум 6 символов и не более 72 байт'
             });
         }
 
@@ -63,6 +65,12 @@ module.exports = (User) => {
 
     router.post('/login', async (req, res) => {
         const { username, password } = req.body || {};
+        if (typeof username !== 'string' || username.trim() === '' || username.trim().length > 32
+            || typeof password !== 'string' || password.trim() === ''
+            || Buffer.byteLength(password, 'utf8') > 72) {
+            return res.status(400).json({ error: 'Укажите корректные имя пользователя и пароль' });
+        }
+
         const user = typeof username === 'string'
             ? await User.findOne({ where: { username: username.trim() } })
             : null;

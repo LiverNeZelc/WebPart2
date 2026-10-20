@@ -1,16 +1,51 @@
-# React + Vite
+# Библиотека алгоритмов
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Клиент React для REST API проекта. Библиотека привязана к аккаунту: требуется
+войти или создать аккаунт, после чего данные загружаются из PostgreSQL через API.
 
-Currently, two official plugins are available:
+## Запуск
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. В корне проекта настройте `.env` для сервера:
 
-## React Compiler
+   ```env
+   DATABASE_URL=postgres://user:password@localhost:5432/database
+   JWT_SECRET=replace-with-a-long-random-secret
+   PORT=3000
+   ```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+2. Установите зависимости и примените миграции из корня проекта:
 
-## Expanding the Oxlint configuration
+   ```bash
+   npm install
+   npx sequelize-cli db:migrate
+   npm run dev
+   ```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+   Для добавления общих демонстрационных алгоритмов можно один раз выполнить
+   `npx sequelize-cli db:seed:all`.
+
+3. В отдельном терминале запустите клиент:
+
+   ```bash
+   cd my-app
+   npm install
+   npm run dev
+   ```
+
+Vite проксирует `/api` на `http://localhost:3000`, поэтому браузеру не требуется
+отдельная настройка CORS. Если сервер запущен на другом адресе, задайте
+`VITE_DEV_API_PROXY_TARGET` в `my-app/.env`. При необходимости URL API можно
+переопределить через `VITE_API_URL` (по умолчанию `/api`).
+
+## Реализовано в лабораторной работе 5
+
+- JWT-регистрация и вход; access/refresh-токены сохраняются в браузере.
+- GET каталога с индикацией загрузки, сообщением об ошибке и кнопкой повтора.
+- Добавление, изменение и удаление с оптимистичным обновлением и откатом при
+  ошибке сервера.
+- Ограничения ввода: название до 100 символов, описание до 1000, поиск до 100;
+  имя аккаунта и пароль также проверяются на клиенте и сервере.
+- Одно дополнительное улучшение: поиск по названию, типу и описанию выполняется
+  на сервере после паузы 350 мс после ввода.
+- Компоненты формы, авторизации, списка и карточки алгоритма вынесены в отдельные
+  файлы в `src/components`.
