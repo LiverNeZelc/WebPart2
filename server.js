@@ -1,6 +1,5 @@
 require('dotenv').config();
 
-const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const { Sequelize, DataTypes } = require('sequelize');
@@ -8,14 +7,19 @@ const algorithmModel = require('./models/algorithm');
 const userModel = require('./models/user');
 const createAlgorithmRepository = require('./models/algorithmRepository');
 const createAuth = require('./auth');
+const createFileLogger = require('./logger');
 
 const app = express();
 const port = process.env.PORT || 3000;
-const logsDirectory = path.join(__dirname, 'logs');
-const requestLogPath = path.join(logsDirectory, 'requests.log');
+const requestLogPath = path.join(__dirname, 'logs', 'requests.log');
 const algorithmLimits = { name: 80, type: 40, description: 500 };
 
-fs.mkdirSync(logsDirectory, { recursive: true });
+
+const logger = createFileLogger(requestLogPath, {
+    maxFileSize: 5 * 1024 * 1024, 
+    maxBackups: 3                 
+});
+
 const demoItems = [
     {
         id: 1,
@@ -56,11 +60,7 @@ app.use((req, res, next) => {
             + `${res.statusCode} - ${Date.now() - startedAt} ms\n`;
 
         console.log(logEntry.trimEnd());
-        fs.appendFile(requestLogPath, logEntry, (error) => {
-            if (error) {
-                console.error('Не удалось записать лог запроса:', error);
-            }
-        });
+        logger.write(logEntry);
     });
 
     next();
@@ -298,6 +298,33 @@ app.use((error, req, res, next) => {
     res.status(500).json({ error: 'Внутренняя ошибка сервера' });
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
     console.log(`Server running on port ${port}`);
+});
+
+// Корректное завершение: дописать очередь лога и закрыть файл
+let shuttingDown = false;
+
+const shutdown = (reason, exitCode = 0) => {
+    if (shuttingDown) {
+        return;
+    }
+
+    shuttingDown = true;
+    logger.write(`${new Date().toISOString()} [server] завершение: ${reason}`);
+    server.close();
+    logger.close().finally(() => process.exit(exitCode));
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('uncaughtException', (error) => {
+    console.error(error);
+    logger.write(`${new Date().toISOString()} [fatal] uncaughtException: ${error.stack}`);
+    shutdown('uncaughtException', 1);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error(reason);
+    logger.write(`${new Date().toISOString()} [fatal] unhandledRejection: ${(reason && reason.stack) || reason}`);
+    shutdown('unhandledRejection', 1);
 });
