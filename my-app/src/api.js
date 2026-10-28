@@ -1,5 +1,8 @@
+import axios from 'axios'
+
 const apiUrl = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 const sessionKey = 'algorithm-library-session'
+const apiClient = axios.create({ baseURL: apiUrl })
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -37,25 +40,6 @@ function saveSession(session) {
   localStorage.setItem(sessionKey, JSON.stringify(session))
 }
 
-async function readResponse(response) {
-  const text = await response.text()
-  let payload = null
-
-  if (text) {
-    try {
-      payload = JSON.parse(text)
-    } catch {
-      throw new Error('Сервер вернул ответ в неожиданном формате.')
-    }
-  }
-
-  if (!response.ok) {
-    throw new ApiError(payload?.error || `Ошибка запроса (${response.status})`, response.status)
-  }
-
-  return payload
-}
-
 async function request(path, options = {}, authenticated = true, canRefresh = true) {
   const session = authenticated ? getSession() : null
   const headers = { ...options.headers }
@@ -69,34 +53,50 @@ async function request(path, options = {}, authenticated = true, canRefresh = tr
 
   let response
   try {
-    response = await fetch(`${apiUrl}${path}`, { ...options, headers, body })
+    response = await apiClient.request({
+      ...options,
+      url: path,
+      headers,
+      data: body,
+    })
   } catch (error) {
-    if (error instanceof TypeError) {
-      throw new Error('Не удалось связаться с сервером. Проверьте, запущен ли API.')
-    }
-    throw error
-  }
+    if (!axios.isAxiosError(error)) throw error
 
-  if (response.status === 401 && authenticated && canRefresh && session?.refreshToken) {
-    try {
-      const tokens = await request(
-        '/auth/refresh',
-        { method: 'POST', body: { refreshToken: session.refreshToken } },
-        false,
-        false,
-      )
-      saveSession({ ...session, ...tokens })
-      return request(path, options, true, false)
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        clearSession()
-        window.dispatchEvent(new Event('auth:expired'))
+    const status = error.response?.status ?? 0
+    if (status === 401 && authenticated && canRefresh && session?.refreshToken) {
+      try {
+        const tokens = await request(
+          '/auth/refresh',
+          { method: 'POST', body: { refreshToken: session.refreshToken } },
+          false,
+          false,
+        )
+        saveSession({ ...session, ...tokens })
+        return request(path, options, true, false)
+      } catch (refreshError) {
+        if (refreshError instanceof ApiError && refreshError.status === 401) {
+          clearSession()
+          window.dispatchEvent(new Event('auth:expired'))
+        }
+        throw refreshError
       }
-      throw error
     }
+
+    if (status >= 500) {
+      throw new ApiError(
+        `Сервер API недоступен (HTTP ${status}). Проверьте, запущен ли сервер.`,
+        status,
+      )
+    }
+
+    if (status === 0) {
+      throw new ApiError('Сервер API недоступен. Проверьте, запущен ли сервер.', 0)
+    }
+
+    throw new ApiError(error.response?.data?.error || `Ошибка запроса (${status})`, status)
   }
 
-  return readResponse(response)
+  return response.data
 }
 
 export async function authenticate(credentials, mode) {

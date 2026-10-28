@@ -18,7 +18,7 @@ function AlgorithmList({
           <button type="button" className="text-button" onClick={onRetry}>Повторить</button>
         </div>
       )}
-      {!loading && !error && algorithms.map((algorithm) => {
+      {algorithms.map((algorithm) => {
         const isOwned = algorithm.owner_id !== null && algorithm.owner_id !== undefined
 
         return (

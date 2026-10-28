@@ -1,10 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { authenticate, clearSession, createAlgorithm, deleteAlgorithm, getSession, listAlgorithms, updateAlgorithm } from './api.js'
 import AlgorithmForm from './components/AlgorithmForm.jsx'
 import AlgorithmList from './components/AlgorithmList.jsx'
 import AuthForm from './components/AuthForm.jsx'
 import AlgorithmDetails from './components/AlgorithmDetails.jsx'
 import './App.css'
+
+const mutationFeedbackDuration = 1000
+
+async function waitForMutationResponse(request) {
+  const [result] = await Promise.allSettled([
+    request,
+    new Promise((resolve) => setTimeout(resolve, mutationFeedbackDuration)),
+  ])
+  if (result.status === 'rejected') throw result.reason
+  return result.value
+}
 
 function App() {
   const [session, setSession] = useState(null)
@@ -18,9 +29,14 @@ function App() {
   const [reloadCount, setReloadCount] = useState(0)
   const [loadError, setLoadError] = useState('')
   const [notice, setNotice] = useState('')
+  const [noticeIsError, setNoticeIsError] = useState(false)
   const [authError, setAuthError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [connectionState, setConnectionState] = useState('idle')
   const [editingAlgorithm, setEditingAlgorithm] = useState(null)
+  const mutationVersion = useRef(0)
+  const pendingMutations = useRef(0)
+  const refreshAfterMutation = useRef(false)
 
   useEffect(() => {
     let active = true
@@ -55,11 +71,20 @@ function App() {
         return
       }
 
+      const requestMutationVersion = mutationVersion.current
       setLoading(true)
       setLoadError('')
       try {
         const items = await listAlgorithms(session.user.id, debouncedQuery)
         if (!active) return
+        if (pendingMutations.current > 0 || requestMutationVersion !== mutationVersion.current) {
+          refreshAfterMutation.current = true
+          if (pendingMutations.current === 0) {
+            refreshAfterMutation.current = false
+            setReloadCount((count) => count + 1)
+          }
+          return
+        }
         setAlgorithms(items)
         setSelectedId((currentId) =>
           items.some((item) => item.id === currentId) ? currentId : (items[0]?.id ?? null),
@@ -95,6 +120,7 @@ function App() {
       setQuery('')
       setDebouncedQuery('')
       setNotice(`Вы вошли как ${nextSession.user.username}`)
+      setNoticeIsError(false)
     } catch (error) {
       setAuthError(error.message)
     }
@@ -107,11 +133,28 @@ function App() {
     setSelectedId(null)
     setEditingAlgorithm(null)
     setNotice('Вы вышли из аккаунта')
+    setNoticeIsError(false)
+  }
+
+  const beginMutation = () => {
+    mutationVersion.current += 1
+    pendingMutations.current += 1
+    setSaving(true)
+    setConnectionState('checking')
+    setNotice('')
+  }
+
+  const finishMutation = () => {
+    pendingMutations.current -= 1
+    setSaving(pendingMutations.current > 0)
+    if (pendingMutations.current === 0 && refreshAfterMutation.current) {
+      refreshAfterMutation.current = false
+      setReloadCount((count) => count + 1)
+    }
   }
 
   const handleSave = async (values) => {
-    setSaving(true)
-    setNotice('')
+    beginMutation()
 
     if (editingAlgorithm) {
       const original = editingAlgorithm
@@ -119,44 +162,58 @@ function App() {
       setAlgorithms((items) => items.map((item) => item.id === original.id ? optimistic : item))
 
       try {
-        const updated = await updateAlgorithm(original.id, values)
+        const updated = await waitForMutationResponse(updateAlgorithm(original.id, values))
         setAlgorithms((items) => items.map((item) => item.id === original.id ? updated : item))
         setEditingAlgorithm(null)
         setNotice('Изменения сохранены')
+        setNoticeIsError(false)
+        setConnectionState('connected')
         return true
       } catch (error) {
         setAlgorithms((items) => items.map((item) => item.id === original.id ? original : item))
-        setNotice(error.message)
+        const unavailable = error.status === 0 || error.status >= 500
+        setNotice(unavailable
+          ? 'Сервер недоступен. Изменения отменены, исходные данные восстановлены.'
+          : error.message)
+        setNoticeIsError(true)
+        setConnectionState(unavailable ? 'unavailable' : 'error')
         return false
       } finally {
-        setSaving(false)
-        setReloadCount((count) => count + 1)
+        finishMutation()
       }
     }
 
     const temporaryId = -Date.now()
-    const temporaryItem = { id: temporaryId, ...values }
+    const temporaryItem = { id: temporaryId, owner_id: session.user.id, ...values }
+    const previousSelectedId = selectedId
     setAlgorithms((items) => [...items, temporaryItem])
     setSelectedId(temporaryId)
 
     try {
-      const created = await createAlgorithm(values)
+      const created = await waitForMutationResponse(createAlgorithm(values))
       setAlgorithms((items) => items.map((item) => item.id === temporaryId ? created : item))
       setSelectedId(created.id)
       setNotice('Алгоритм добавлен')
+      setNoticeIsError(false)
+      setConnectionState('connected')
       return true
     } catch (error) {
       setAlgorithms((items) => items.filter((item) => item.id !== temporaryId))
-      setSelectedId((currentId) => currentId === temporaryId ? (algorithms[0]?.id ?? null) : currentId)
-      setNotice(error.message)
+      setSelectedId((currentId) => currentId === temporaryId ? previousSelectedId : currentId)
+      const unavailable = error.status === 0 || error.status >= 500
+      setNotice(unavailable
+        ? 'Сервер недоступен. Добавление отменено.'
+        : error.message)
+      setNoticeIsError(true)
+      setConnectionState(unavailable ? 'unavailable' : 'error')
       return false
     } finally {
-      setSaving(false)
-      setReloadCount((count) => count + 1)
+      finishMutation()
     }
   }
 
   const handleDelete = async (algorithm) => {
+    beginMutation()
     const index = algorithms.findIndex((item) => item.id === algorithm.id)
     const nextSelection = algorithms[index + 1] ?? algorithms[index - 1] ?? null
     setAlgorithms((items) => items.filter((item) => item.id !== algorithm.id))
@@ -164,18 +221,28 @@ function App() {
     setNotice('')
 
     try {
-      await deleteAlgorithm(algorithm.id)
+      await waitForMutationResponse(deleteAlgorithm(algorithm.id))
       setNotice('Алгоритм удалён')
+      setNoticeIsError(false)
+      setConnectionState('connected')
     } catch (error) {
       setAlgorithms((items) => {
         const restored = [...items]
         restored.splice(Math.min(index, restored.length), 0, algorithm)
         return restored
       })
-      if (selectedId === algorithm.id) setSelectedId(algorithm.id)
-      setNotice(error.message)
+      if (selectedId === algorithm.id) {
+        const fallbackId = nextSelection?.id ?? null
+        setSelectedId((currentId) => currentId === fallbackId ? algorithm.id : currentId)
+      }
+      const unavailable = error.status === 0 || error.status >= 500
+      setNotice(unavailable
+        ? 'Сервер недоступен. Удаление отменено, карточка восстановлена.'
+        : error.message)
+      setNoticeIsError(true)
+      setConnectionState(unavailable ? 'unavailable' : 'error')
     } finally {
-      setReloadCount((count) => count + 1)
+      finishMutation()
     }
   }
 
@@ -203,6 +270,17 @@ function App() {
           <p className="eyebrow">Лабораторная работа 5</p>
           <h1>Библиотека алгоритмов</h1>
         </div>
+        {session && connectionState !== 'idle' && (
+          <span
+            className={`connection-status connection-${connectionState}`}
+            role={connectionState === 'unavailable' || connectionState === 'error' ? 'alert' : 'status'}
+          >
+            {connectionState === 'checking' && 'Отправляем запрос серверу...'}
+            {connectionState === 'connected' && 'Сервер ответил'}
+            {connectionState === 'unavailable' && 'Сервер недоступен'}
+            {connectionState === 'error' && 'Ошибка ответа сервера'}
+          </span>
+        )}
         {session && (
           <div className="account-actions">
             <span>{session.user.username}</span>
@@ -214,6 +292,13 @@ function App() {
       {!session ? (
         <AuthForm onSubmit={handleAuthentication} error={authError} />
       ) : (
+        <>
+        {connectionState === 'checking' && (
+          <p className="request-status" role="status" aria-live="polite">
+            <span className="request-spinner" aria-hidden="true" />
+            Запрос отправляется на сервер. Изменение уже показано на клиенте.
+          </p>
+        )}
         <section className="workspace">
           <aside className="sidebar">
             <div className="section-heading">
@@ -256,7 +341,14 @@ function App() {
           </aside>
 
           <section className="content-area">
-            {notice && <p className="notice" role="status">{notice}</p>}
+            {notice && (
+              <p
+                className={noticeIsError ? 'notice notice-error' : 'notice'}
+                role={noticeIsError ? 'alert' : 'status'}
+              >
+                {notice}
+              </p>
+            )}
             <AlgorithmDetails algorithm={selectedAlgorithm} />
             <AlgorithmForm
               key={editingAlgorithm?.id ?? 'new'}
@@ -267,6 +359,7 @@ function App() {
             />
           </section>
         </section>
+        </>
       )}
     </main>
   )
