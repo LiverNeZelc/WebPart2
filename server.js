@@ -13,11 +13,19 @@ const app = express();
 const port = process.env.PORT || 3000;
 const requestLogPath = path.join(__dirname, 'logs', 'requests.log');
 const algorithmLimits = { name: 80, type: 40, description: 500 };
+let logFileUnavailable = false;
 
 
 const logger = createFileLogger(requestLogPath, {
     maxFileSize: 5 * 1024 * 1024, 
-    maxBackups: 3                 
+    maxBackups: 3,
+    onError: (message, error) => {
+        logFileUnavailable = true;
+        console.error(`[logger] ${message}${error ? `: ${error.code || error.message}` : ''}`);
+    },
+    onReady: () => {
+        logFileUnavailable = false;
+    }
 });
 
 const demoItems = [
@@ -69,6 +77,20 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '16kb' }));
 app.use(express.urlencoded({ extended: false, limit: '16kb', parameterLimit: 20 }));
 app.use(express.static('public', { index: false }));
+
+app.use((req, res, next) => {
+    if (!logFileUnavailable) {
+        return next();
+    }
+
+    const message = 'Сервис временно недоступен: возникла проблема с файлом журнала. Попробуйте позже.';
+
+    if (req.path.startsWith('/algorithms') || req.path.startsWith('/auth')) {
+        return res.status(503).json({ error: message });
+    }
+
+    return res.status(503).render('log-error', { title: 'Проблема с журналом' });
+});
 
 const demoAuth = (req, res, next) => {
     if (req.query.auth !== '1') {

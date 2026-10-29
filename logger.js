@@ -18,6 +18,7 @@ function createFileLogger(filePath, options = {}) {
     const onError = options.onError ?? ((message, error) => {
         console.error(`[logger] ${message}${error ? `: ${error.code || error.message}` : ''}`);
     });
+    const onReady = options.onReady ?? noop;
 
     const dir = path.dirname(filePath);
 
@@ -111,6 +112,7 @@ function createFileLogger(filePath, options = {}) {
                     fileSize = Number(stat.size);
                     ready = true;
                     retryDelay = retryDelayMin;
+                    onReady();
                     flush();
                 });
             });
