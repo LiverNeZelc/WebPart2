@@ -75,7 +75,7 @@ function App() {
       setLoading(true)
       setLoadError('')
       try {
-        const items = await listAlgorithms(session.user.id, debouncedQuery)
+        const items = await listAlgorithms(debouncedQuery)
         if (!active) return
         if (pendingMutations.current > 0 || requestMutationVersion !== mutationVersion.current) {
           refreshAfterMutation.current = true
@@ -267,7 +267,7 @@ function App() {
       <header className="topbar">
         <div className="brand-mark" aria-hidden="true">AL</div>
         <div>
-          <p className="eyebrow">Лабораторная работа 5</p>
+          <p className="eyebrow">Лабораторная работа 6</p>
           <h1>Библиотека алгоритмов</h1>
         </div>
         {session && connectionState !== 'idle' && (
@@ -315,7 +315,7 @@ function App() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value.slice(0, 100))}
                 maxLength={100}
-                placeholder="Название, тип или описание"
+                placeholder="Название, тип, описание или критерий"
               />
             </label>
 

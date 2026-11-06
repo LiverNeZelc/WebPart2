@@ -2,3 +2,4 @@ node_modules/
 .postman/
 .vscode/
 .env
+atlas-credentials.env

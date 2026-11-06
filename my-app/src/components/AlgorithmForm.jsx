@@ -1,12 +1,23 @@
 import { useState } from 'react'
 
-const emptyForm = { name: '', type: 'Поиск', description: '' }
+const emptyForm = { name: '', type: 'Поиск', description: '', criteria: [] }
 const maxNameLength = 100
 const maxDescriptionLength = 1000
+const maxCriteria = 50
+const maxCriterionNameLength = 100
+const maxCriterionDescriptionLength = 2000
 
 function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
   const [values, setValues] = useState(() => algorithm
-    ? { name: algorithm.name, type: algorithm.type, description: algorithm.description }
+    ? {
+      name: algorithm.name,
+      type: algorithm.type,
+      description: algorithm.description,
+      criteria: (algorithm.criteria || []).map((criterion) => ({
+        name: criterion.name,
+        description: criterion.description || '',
+      })),
+    }
     : emptyForm)
   const [errors, setErrors] = useState({})
 
@@ -14,6 +25,23 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
     const { name, value } = event.target
     setValues((current) => ({ ...current, [name]: value }))
     setErrors((current) => ({ ...current, [name]: '' }))
+  }
+
+  const updateCriterion = (index, field, value) => {
+    setValues((current) => ({
+      ...current,
+      criteria: current.criteria.map((criterion, criterionIndex) => (
+        criterionIndex === index ? { ...criterion, [field]: value } : criterion
+      )),
+    }))
+    setErrors((current) => ({ ...current, [`criterion-${index}-${field}`]: '' }))
+  }
+
+  const addCriterion = () => {
+    setValues((current) => ({
+      ...current,
+      criteria: [...current.criteria, { name: '', description: '' }],
+    }))
   }
 
   const handleSubmit = async (event) => {
@@ -27,6 +55,16 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
     if (values.description.trim().length > maxDescriptionLength) {
       nextErrors.description = `Описание должно быть не длиннее ${maxDescriptionLength} символов.`
     }
+    values.criteria.forEach((criterion, index) => {
+      if (!criterion.name.trim()) {
+        nextErrors[`criterion-${index}-name`] = 'Введите название критерия.'
+      } else if (criterion.name.trim().length > maxCriterionNameLength) {
+        nextErrors[`criterion-${index}-name`] = `Название критерия должно быть не длиннее ${maxCriterionNameLength} символов.`
+      }
+      if (criterion.description.trim().length > maxCriterionDescriptionLength) {
+        nextErrors[`criterion-${index}-description`] = `Описание критерия должно быть не длиннее ${maxCriterionDescriptionLength} символов.`
+      }
+    })
     if (Object.keys(nextErrors).length) {
       setErrors(nextErrors)
       return
@@ -37,6 +75,10 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
       name: values.name.trim(),
       type: values.type,
       description: values.description.trim(),
+      criteria: values.criteria.map((criterion) => ({
+        name: criterion.name.trim(),
+        description: criterion.description.trim(),
+      })),
     })
     if (saved !== false && !algorithm) {
       setValues(emptyForm)
@@ -104,6 +146,72 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
             </span>
           )}
         </label>
+        <fieldset className="criteria-fieldset wide">
+          <legend>Критерии алгоритма</legend>
+          <p className="field-hint">
+            Можно добавить до {maxCriteria} критериев с собственными описаниями.
+          </p>
+          {values.criteria.map((criterion, index) => (
+            <div className="criterion-card" key={index}>
+              <div className="criterion-heading">
+                <strong>Критерий {index + 1}</strong>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setValues((current) => ({
+                    ...current,
+                    criteria: current.criteria.filter((_, criterionIndex) => criterionIndex !== index),
+                  }))}
+                  disabled={saving}
+                  aria-label={`Удалить критерий ${index + 1}`}
+                >
+                  Удалить
+                </button>
+              </div>
+              <label>
+                <span>Название критерия</span>
+                <input
+                  value={criterion.name}
+                  onChange={(event) => updateCriterion(index, 'name', event.target.value)}
+                  maxLength={maxCriterionNameLength}
+                  aria-invalid={Boolean(errors[`criterion-${index}-name`])}
+                  required
+                />
+                <span className="field-hint">
+                  {criterion.name.length}/{maxCriterionNameLength}
+                </span>
+                {errors[`criterion-${index}-name`] && (
+                  <span className="field-error" role="alert">{errors[`criterion-${index}-name`]}</span>
+                )}
+              </label>
+              <label>
+                <span>Описание критерия</span>
+                <textarea
+                  value={criterion.description}
+                  onChange={(event) => updateCriterion(index, 'description', event.target.value)}
+                  maxLength={maxCriterionDescriptionLength}
+                  rows="2"
+                />
+                <span className="field-hint">
+                  {criterion.description.length}/{maxCriterionDescriptionLength}
+                </span>
+                {errors[`criterion-${index}-description`] && (
+                  <span className="field-error" role="alert">
+                    {errors[`criterion-${index}-description`]}
+                  </span>
+                )}
+              </label>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="text-button add-criterion-button"
+            onClick={addCriterion}
+            disabled={saving || values.criteria.length >= maxCriteria}
+          >
+            {values.criteria.length >= maxCriteria ? 'Достигнут лимит критериев' : 'Добавить критерий'}
+          </button>
+        </fieldset>
       </div>
       <button className="primary-button" type="submit" disabled={saving}>
         {saving ? 'Сохраняем...' : algorithm ? 'Сохранить изменения' : 'Добавить в каталог'}

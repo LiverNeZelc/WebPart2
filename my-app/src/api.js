@@ -108,11 +108,11 @@ export async function authenticate(credentials, mode) {
   return session
 }
 
-export async function listAlgorithms(ownerId, search) {
+export async function listAlgorithms(search) {
   const params = new URLSearchParams()
   if (search) params.set('search', search)
   const suffix = params.size ? `?${params}` : ''
-  return request(`/algorithms/${ownerId}${suffix}`)
+  return request(`/algorithms${suffix}`)
 }
 
 export async function createAlgorithm(algorithm) {
