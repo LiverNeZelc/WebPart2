@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { authenticate, clearSession, createAlgorithm, deleteAlgorithm, getSession, listAlgorithms, updateAlgorithm } from './api.js'
+import { authenticate, clearSession, createAlgorithm, deleteAlgorithm, getSession, listAlgorithms, listPublicAlgorithms, updateAlgorithm } from './api.js'
 import AlgorithmForm from './components/AlgorithmForm.jsx'
 import AlgorithmList from './components/AlgorithmList.jsx'
 import AuthForm from './components/AuthForm.jsx'
 import AlgorithmDetails from './components/AlgorithmDetails.jsx'
+import SortCatalog from './components/SortCatalog.jsx'
+import SortCompetition from './components/SortCompetition.jsx'
 import './App.css'
 
 const mutationFeedbackDuration = 1000
+const apiUrl = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 
 async function waitForMutationResponse(request) {
   const [result] = await Promise.allSettled([
@@ -21,6 +24,15 @@ function App() {
   const [session, setSession] = useState(null)
   const [restoringSession, setRestoringSession] = useState(true)
   const [algorithms, setAlgorithms] = useState([])
+  const [publicAlgorithms, setPublicAlgorithms] = useState([])
+  const [publicLoading, setPublicLoading] = useState(true)
+  const [publicError, setPublicError] = useState('')
+  const [publicReloadCount, setPublicReloadCount] = useState(0)
+  const [activeTab, setActiveTab] = useState('library')
+  const [selectedReferenceId, setSelectedReferenceId] = useState('')
+  const [sortSocket, setSortSocket] = useState(null)
+  const [socketError, setSocketError] = useState('')
+  const [challenges, setChallenges] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
@@ -37,6 +49,106 @@ function App() {
   const mutationVersion = useRef(0)
   const pendingMutations = useRef(0)
   const refreshAfterMutation = useRef(false)
+  const sortSocketRef = useRef(null)
+  const accessToken = session?.accessToken
+
+  useEffect(() => {
+    let active = true
+    const loadPublicAlgorithms = async () => {
+      setPublicLoading(true)
+      setPublicError('')
+      try {
+        const items = await listPublicAlgorithms()
+        if (active) setPublicAlgorithms(items)
+      } catch (error) {
+        if (active) setPublicError(error.message)
+      } finally {
+        if (active) setPublicLoading(false)
+      }
+    }
+
+    loadPublicAlgorithms()
+    return () => { active = false }
+  }, [publicReloadCount, activeTab])
+
+  useEffect(() => {
+    if (!accessToken) {
+      sortSocketRef.current?.close()
+      sortSocketRef.current = null
+      return undefined
+    }
+
+    let active = true
+    const apiRoot = new URL(apiUrl, window.location.href)
+    const websocketUrl = new URL('/ws/sort', apiRoot)
+    websocketUrl.protocol = websocketUrl.protocol === 'https:' ? 'wss:' : 'ws:'
+    const socket = new WebSocket(websocketUrl)
+    sortSocketRef.current = socket
+
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ type: 'authenticate', token: accessToken }))
+    }
+    socket.onmessage = (event) => {
+      let message
+      try {
+        message = JSON.parse(event.data)
+      } catch {
+        if (active) setSocketError('Получено некорректное сообщение WebSocket')
+        return
+      }
+
+      if (message.type === 'authenticated') {
+        if (active) {
+          setSortSocket(socket)
+          setSocketError('')
+        }
+      } else if (message.type === 'challenge') {
+        if (active) {
+          setChallenges((items) => [
+            ...items.filter((item) => item.challengeId !== message.challengeId),
+            { ...message, accepting: false },
+          ])
+        }
+      } else if (['challenge-removed', 'challenge-expired', 'challenge-cancelled'].includes(message.type)) {
+        if (active) {
+          setChallenges((items) => items.filter((item) => item.challengeId !== message.challengeId))
+          if (message.type === 'challenge-expired') {
+            setSocketError('Время ожидания приглашения истекло')
+          }
+        }
+      } else if (message.type === 'matched') {
+        if (active) {
+          setActiveTab('competition')
+          setChallenges([])
+        }
+      } else if (message.type === 'challenge-declined') {
+        if (active) {
+          setSocketError(`${message.username} отклонил приглашение`)
+          setActiveTab('competition')
+        }
+      } else if (message.type === 'error') {
+        if (active) {
+          setSocketError(message.message)
+          setChallenges((items) => items.map((item) => ({ ...item, accepting: false })))
+        }
+      }
+    }
+    socket.onerror = () => {
+      if (active) setSocketError('Соединение WebSocket недоступно')
+    }
+    socket.onclose = () => {
+      if (active) {
+        setSortSocket(null)
+        setSocketError('Соединение с уведомлениями WebSocket закрыто')
+      }
+    }
+
+    return () => {
+      active = false
+      socket.close()
+      if (sortSocketRef.current === socket) sortSocketRef.current = null
+    }
+  }, [accessToken])
 
   useEffect(() => {
     let active = true
@@ -117,6 +229,7 @@ function App() {
     try {
       const nextSession = await authenticate(credentials, mode)
       setSession(nextSession)
+      setActiveTab('library')
       setQuery('')
       setDebouncedQuery('')
       setNotice(`Вы вошли как ${nextSession.user.username}`)
@@ -127,11 +240,15 @@ function App() {
   }
 
   const handleLogout = () => {
+    sortSocketRef.current?.close()
+    setSortSocket(null)
     clearSession()
     setSession(null)
+    setActiveTab('library')
     setAlgorithms([])
     setSelectedId(null)
     setEditingAlgorithm(null)
+    setChallenges([])
     setNotice('Вы вышли из аккаунта')
     setNoticeIsError(false)
   }
@@ -164,6 +281,7 @@ function App() {
       try {
         const updated = await waitForMutationResponse(updateAlgorithm(original.id, values))
         setAlgorithms((items) => items.map((item) => item.id === original.id ? updated : item))
+        setPublicReloadCount((count) => count + 1)
         setEditingAlgorithm(null)
         setNotice('Изменения сохранены')
         setNoticeIsError(false)
@@ -192,6 +310,7 @@ function App() {
     try {
       const created = await waitForMutationResponse(createAlgorithm(values))
       setAlgorithms((items) => items.map((item) => item.id === temporaryId ? created : item))
+      setPublicReloadCount((count) => count + 1)
       setSelectedId(created.id)
       setNotice('Алгоритм добавлен')
       setNoticeIsError(false)
@@ -222,6 +341,7 @@ function App() {
 
     try {
       await waitForMutationResponse(deleteAlgorithm(algorithm.id))
+      if (algorithm.is_public) setPublicReloadCount((count) => count + 1)
       setNotice('Алгоритм удалён')
       setNoticeIsError(false)
       setConnectionState('connected')
@@ -247,11 +367,33 @@ function App() {
   }
 
   const handleAuthExpired = useCallback(() => {
+    sortSocketRef.current?.close()
+    setSortSocket(null)
     setSession(null)
     setAlgorithms([])
     setSelectedId(null)
+    setChallenges([])
     setAuthError('Срок действия сеанса истёк. Войдите снова.')
   }, [])
+
+  const respondToChallenge = (challenge, accept) => {
+    if (sortSocket?.readyState !== WebSocket.OPEN) {
+      setSocketError('Нет соединения с сервером уведомлений')
+      return
+    }
+    if (accept) {
+      setChallenges((items) => items.map((item) => (
+        item.challengeId === challenge.challengeId ? { ...item, accepting: true } : item
+      )))
+      setActiveTab('competition')
+    } else {
+      setChallenges((items) => items.filter((item) => item.challengeId !== challenge.challengeId))
+    }
+    sortSocket.send(JSON.stringify({
+      type: accept ? 'accept-challenge' : 'decline-challenge',
+      challengeId: challenge.challengeId,
+    }))
+  }
 
   useEffect(() => {
     window.addEventListener('auth:expired', handleAuthExpired)
@@ -267,7 +409,6 @@ function App() {
       <header className="topbar">
         <div className="brand-mark" aria-hidden="true">AL</div>
         <div>
-          <p className="eyebrow">Лабораторная работа 6</p>
           <h1>Библиотека алгоритмов</h1>
         </div>
         {session && connectionState !== 'idle' && (
@@ -289,7 +430,110 @@ function App() {
         )}
       </header>
 
-      {!session ? (
+      <nav className="main-tabs" aria-label="Разделы сайта">
+        <button
+          type="button"
+          className={activeTab === 'library' ? 'active' : ''}
+          aria-current={activeTab === 'library' ? 'page' : undefined}
+          onClick={() => setActiveTab('library')}
+        >
+          Каталог алгоритмов
+        </button>
+        <button
+          type="button"
+          className={activeTab === 'sorts' ? 'active' : ''}
+          aria-current={activeTab === 'sorts' ? 'page' : undefined}
+          onClick={() => setActiveTab('sorts')}
+        >
+          Сортировки <span>{publicAlgorithms.length}</span>
+        </button>
+        <button
+          type="button"
+          className={activeTab === 'competition' ? 'active' : ''}
+          aria-current={activeTab === 'competition' ? 'page' : undefined}
+          onClick={() => setActiveTab('competition')}
+        >
+          Соревнование
+        </button>
+      </nav>
+
+      {challenges.length > 0 && (
+        <section className="challenge-inbox" aria-label="Приглашения на соревнование">
+          <div className="challenge-inbox-heading">
+            <div>
+              <p className="eyebrow">Входящие</p>
+              <h2>Приглашения на соревнование</h2>
+            </div>
+            <span className="count-badge">{challenges.length}</span>
+          </div>
+          {challenges.map((challenge) => (
+            <article className="challenge-card" key={challenge.challengeId}>
+              <div>
+                <strong>{challenge.challengerName}</strong>
+                <p>
+                  Вызывает на соревнование: <b>{challenge.targetAlgorithmName}</b>
+                  {' '}против <b>{challenge.algorithmName}</b>
+                </p>
+              </div>
+              <div className="challenge-actions">
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => respondToChallenge(challenge, true)}
+                  disabled={challenge.accepting}
+                >
+                  {challenge.accepting ? 'Подключаем...' : 'Принять и начать'}
+                </button>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => respondToChallenge(challenge, false)}
+                  disabled={challenge.accepting}
+                >
+                  Отклонить
+                </button>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
+      {socketError && (
+        <p className="competition-status" role="status">
+          {socketError}
+          <button type="button" className="text-button" onClick={() => setSocketError('')}>Закрыть</button>
+        </p>
+      )}
+
+      {activeTab === 'sorts' && (
+        <SortCatalog
+          algorithms={publicAlgorithms}
+          loading={publicLoading}
+          error={publicError}
+          onRetry={() => setPublicReloadCount((count) => count + 1)}
+          isAuthenticated={Boolean(session)}
+          onCompare={(referenceId) => {
+            setSelectedReferenceId(referenceId)
+            setActiveTab(session ? 'competition' : 'library')
+          }}
+        />
+      )}
+
+      {activeTab === 'competition' && !session && (
+        <AuthForm onSubmit={handleAuthentication} error={authError} />
+      )}
+      {session && (
+        <div hidden={activeTab !== 'competition'}>
+          <SortCompetition
+            session={session}
+            algorithms={algorithms}
+            publicAlgorithms={publicAlgorithms}
+            initialReferenceId={selectedReferenceId}
+            socket={sortSocket}
+          />
+        </div>
+      )}
+
+      {activeTab === 'library' && (!session ? (
         <AuthForm onSubmit={handleAuthentication} error={authError} />
       ) : (
         <>
@@ -360,7 +604,7 @@ function App() {
           </section>
         </section>
         </>
-      )}
+      ))}
     </main>
   )
 }

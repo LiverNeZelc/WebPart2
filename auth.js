@@ -10,6 +10,14 @@ module.exports = (User) => {
     const accessTokenExpiresIn = process.env.ACCESS_TOKEN_EXPIRES_IN || '15m';
     const refreshTokenExpiresIn = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
 
+    const verifyAccessToken = (token) => {
+        const payload = jwt.verify(token, jwtSecret);
+        if (!Number.isInteger(payload.userId) || payload.userId < 1 || payload.type === 'refresh') {
+            throw new Error('Недействительный access-токен');
+        }
+        return payload;
+    };
+
     const createTokens = (userId) => ({
         accessToken: jwt.sign({ userId }, jwtSecret, { expiresIn: accessTokenExpiresIn }),
         refreshToken: jwt.sign({ userId, type: 'refresh' }, jwtSecret, {
@@ -28,7 +36,7 @@ module.exports = (User) => {
         }
 
         try {
-            req.user = jwt.verify(token, jwtSecret);
+            req.user = verifyAccessToken(token);
             return next();
         } catch (error) {
             return res.status(401).json({ error: 'Недействительный или истёкший токен' });
@@ -124,5 +132,5 @@ module.exports = (User) => {
         return res.json(publicUser(user));
     });
 
-    return { router, authenticate };
+    return { router, authenticate, verifyAccessToken };
 };

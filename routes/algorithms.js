@@ -4,15 +4,20 @@ const express = require('express');
 
 const maxCriteria = 50;
 const maxSearchLength = 100;
+const maxPythonCodeLength = 12000;
 const objectIdPattern = /^[a-f\d]{24}$/i;
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const toPublicAlgorithm = (algorithm) => ({
+const toPublicAlgorithm = (algorithm, viewerId = null) => ({
     id: algorithm._id.toString(),
     name: algorithm.name,
     type: algorithm.type,
     description: algorithm.description,
+    python_code: algorithm.is_public || algorithm.owner_id === viewerId
+        ? algorithm.python_code || ''
+        : '',
+    is_public: Boolean(algorithm.is_public),
     criteria: algorithm.criteria || [],
     owner_id: algorithm.owner_id ?? null,
     createdAt: algorithm.createdAt,
@@ -43,6 +48,19 @@ const validateAlgorithm = (data) => {
     }
     if (data.description.trim().length > 1000) {
         return 'Описание не должно превышать 1000 символов';
+    }
+
+    if (data.python_code !== undefined && typeof data.python_code !== 'string') {
+        return 'Код Python должен быть текстом';
+    }
+    if ((data.python_code || '').length > maxPythonCodeLength) {
+        return `Код Python не должен превышать ${maxPythonCodeLength} символов`;
+    }
+    if (data.is_public !== undefined && typeof data.is_public !== 'boolean') {
+        return 'Видимость должна быть логическим значением';
+    }
+    if (data.is_public && (data.type.trim() !== 'Сортировка' || !data.python_code?.trim())) {
+        return 'Публичной можно сделать только сортировку с заполненным кодом Python';
     }
 
     if (data.criteria !== undefined && !Array.isArray(data.criteria)) {
@@ -77,6 +95,8 @@ const algorithmData = (data) => ({
     name: data.name.trim(),
     type: data.type.trim(),
     description: data.description.trim(),
+    python_code: data.type.trim() === 'Сортировка' ? (data.python_code || '').trim() : '',
+    is_public: data.type.trim() === 'Сортировка' && data.is_public === true,
     criteria: (data.criteria || []).map((criterion) => ({
         name: criterion.name.trim(),
         description: (criterion.description || '').trim()
@@ -85,7 +105,6 @@ const algorithmData = (data) => ({
 
 module.exports = (Algorithm, authenticate) => {
     const router = express.Router();
-    router.use(authenticate);
 
     const listAlgorithms = async (req, res) => {
         const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
@@ -110,9 +129,19 @@ module.exports = (Algorithm, authenticate) => {
         }
 
         const algorithms = await Algorithm.find(filter).sort({ _id: 1 }).lean();
-        return res.json(algorithms.map(toPublicAlgorithm));
+        return res.json(algorithms.map((algorithm) => toPublicAlgorithm(algorithm, req.user.userId)));
     };
 
+    router.get('/public', async (req, res) => {
+        const algorithms = await Algorithm.find({
+            type: 'Сортировка',
+            is_public: true,
+            python_code: { $ne: '' }
+        }).sort({ createdAt: -1, _id: 1 }).lean();
+        return res.json(algorithms.map((algorithm) => toPublicAlgorithm(algorithm)));
+    });
+
+    router.use(authenticate);
     router.get('/', listAlgorithms);
     router.get('/:ownerId', async (req, res) => {
         const ownerId = Number(req.params.ownerId);
@@ -135,7 +164,7 @@ module.exports = (Algorithm, authenticate) => {
             ...algorithmData(req.body),
             owner_id: req.user.userId
         });
-        return res.status(201).json(toPublicAlgorithm(algorithm));
+        return res.status(201).json(toPublicAlgorithm(algorithm, req.user.userId));
     });
 
     router.put('/:id', async (req, res) => {
@@ -158,7 +187,7 @@ module.exports = (Algorithm, authenticate) => {
 
         Object.assign(algorithm, algorithmData(req.body));
         await algorithm.save();
-        return res.json(toPublicAlgorithm(algorithm));
+        return res.json(toPublicAlgorithm(algorithm, req.user.userId));
     });
 
     router.delete('/:id', async (req, res) => {

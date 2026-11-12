@@ -36,6 +36,15 @@ const algorithmSchema = new mongoose.Schema({
         maxlength: 1000,
         trim: true
     },
+    python_code: {
+        type: String,
+        maxlength: 12000,
+        default: ''
+    },
+    is_public: {
+        type: Boolean,
+        default: false
+    },
     criteria: {
         type: [criterionSchema],
         default: [],

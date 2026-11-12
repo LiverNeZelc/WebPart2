@@ -42,6 +42,8 @@ input:focus, select:focus, textarea:focus { border-color: #c56f4d; box-shadow: 0
 .details-panel .panel-heading { align-items: center; margin-top: 13px; }
 .details-footnote { margin-top: 26px; padding-top: 14px; border-top: 1px solid #d9e1da; color: #668078; font: 12px Arial, sans-serif; }
 .form-grid { display: grid; grid-template-columns: 1fr 180px; gap: 18px; margin-top: 25px; }
+.algorithm-fields { min-width: 0; padding: 0; border: 0; }
+.validation-status { margin-top: 20px; color: #745a1c; font: 700 13px/1.5 Arial, sans-serif; }
 .form-grid label { min-width: 0; }
 .wide { grid-column: 1 / -1; }
 textarea { resize: vertical; min-height: 84px; }
@@ -84,3 +86,85 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #a3544
 .criteria-details li { overflow-wrap: anywhere; }
 .criteria-details li p { margin-top: 4px; color: #668078; line-height: 1.5; overflow-wrap: anywhere; }
 @media (max-width: 560px) { .connection-status { margin-left: auto; text-align: right; } .notice { right: 16px; bottom: 16px; } }
+
+.main-tabs { display: flex; gap: 8px; max-width: 1380px; margin: 0 auto; padding: 14px 42px 0; border-bottom: 1px solid #c7d3ca; }
+.main-tabs button { padding: 11px 15px; border: 0; border-bottom: 3px solid transparent; color: #527166; background: transparent; font: 700 12px Arial, sans-serif; text-transform: uppercase; }
+.main-tabs button:hover, .main-tabs button.active { border-bottom-color: #c56f4d; color: #173c37; }
+.main-tabs button span { margin-left: 5px; color: #c56f4d; }
+.sort-catalog-page, .competition-page { display: grid; align-content: start; gap: 22px; max-width: 1380px; min-height: calc(100svh - 160px); margin: 0 auto; padding: 36px 42px; }
+.page-intro { display: grid; gap: 8px; }
+.page-intro h2 { font-size: clamp(24px, 3vw, 34px); }
+.page-intro .description { max-width: 760px; margin-top: 0; }
+.sort-catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr)); gap: 20px; }
+.sort-public-card, .competition-track { min-width: 0; padding: 22px; border: 1px solid #c7d3ca; background: rgba(255, 253, 248, .76); box-shadow: 0 16px 40px rgba(32, 48, 46, .06); }
+.sort-public-card h3, .competition-track h3 { margin: 0; color: #173c37; font-size: 20px; overflow-wrap: anywhere; }
+.sort-public-card .description { min-height: 42px; }
+.python-code { max-height: 420px; overflow: auto; margin: 18px 0 0; padding: 16px; border: 1px solid #d9e1da; color: #e7f2e9; background: #173c37; font: 12px/1.6 Consolas, 'Courier New', monospace; white-space: pre; tab-size: 4; }
+.public-code-label { display: inline-block; margin-left: 8px; color: #c56f4d; font: 700 10px Arial, sans-serif; text-transform: uppercase; }
+.sort-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; color: #668078; font: 12px Arial, sans-serif; }
+.sort-card-footer .primary-button { margin-top: 0; }
+.visibility-toggle { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 10px !important; text-transform: none !important; letter-spacing: 0 !important; }
+.visibility-toggle input { width: 18px; height: 18px; margin: 0; accent-color: #173c37; }
+.visibility-toggle span { line-height: 1.4; }
+.competition-setup { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 14px; padding: 22px; border: 1px solid #c7d3ca; background: rgba(255, 253, 248, .76); }
+.competition-setup label { display: grid; gap: 6px; color: #527166; font: 700 11px Arial, sans-serif; letter-spacing: .8px; text-transform: uppercase; }
+.competition-setup .primary-button { margin-top: 0; }
+.competition-session { display: grid; gap: 18px; }
+.competition-status, .shared-array-label { padding: 12px 16px; border: 1px solid #d9e1da; color: #315746; background: #f5fff4; font: 700 13px/1.5 Arial, sans-serif; overflow-wrap: anywhere; }
+.competition-tracks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+.competition-track h3 { min-height: 48px; margin-top: 5px; }
+.sort-bars { display: flex; align-items: flex-end; gap: 3px; height: 200px; margin-top: 18px; padding: 10px 8px 0; border-bottom: 1px solid #c7d3ca; background: repeating-linear-gradient(to top, transparent 0, transparent 49px, rgba(102, 128, 120, .12) 50px); }
+.sort-bars span { min-width: 2px; flex: 1 1 0; border-radius: 2px 2px 0 0; background: linear-gradient(180deg, #c56f4d, #173c37); transition: height .08s linear; }
+.track-meta { min-height: 18px; margin-top: 10px; color: #668078; font: 12px Arial, sans-serif; }
+.reference-track { border-color: #dfb39e; }
+.competition-session > .text-button { justify-self: start; }
+.competition-chat { display: grid; gap: 14px; padding: 20px; border: 1px solid #c7d3ca; background: rgba(255, 253, 248, .76); }
+.competition-chat h3 { margin: 0; color: #173c37; font-size: 18px; }
+.chat-messages { display: grid; gap: 10px; max-height: 260px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.chat-messages li { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 10px; padding: 10px 12px; border: 1px solid #d9e1da; background: #fffdf8; }
+.chat-messages strong { color: #315746; font: 700 12px Arial, sans-serif; }
+.chat-messages li > span { min-width: 0; color: #20302e; font-size: 13px; overflow-wrap: anywhere; }
+.chat-messages time { color: #668078; font: 11px Arial, sans-serif; }
+.chat-messages .chat-empty { display: block; color: #668078; font-size: 13px; }
+.chat-form { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+.chat-input-group { display: grid; min-width: 0; gap: 5px; }
+.chat-character-count { color: #668078; font: 11px Arial, sans-serif; text-align: right; }
+.chat-form .primary-button { margin-top: 0; }
+@media (max-width: 860px) {
+  .main-tabs { padding-right: 20px; padding-left: 20px; }
+  .sort-catalog-page, .competition-page { padding: 24px 20px 40px; }
+  .competition-setup { grid-template-columns: 1fr 1fr; }
+  .competition-setup .primary-button { grid-column: 1 / -1; justify-self: start; }
+  .chat-messages li { grid-template-columns: auto 1fr; }
+  .chat-messages time { grid-column: 2; }
+}
+@media (max-width: 560px) {
+  .main-tabs { gap: 0; padding-right: 8px; padding-left: 8px; }
+  .main-tabs button { padding: 10px 8px; font-size: 10px; }
+  .sort-catalog-page, .competition-page { padding: 24px 16px 36px; }
+  .sort-public-card, .competition-track { padding: 18px; }
+  .sort-card-footer { align-items: flex-start; flex-direction: column; }
+  .competition-setup { grid-template-columns: 1fr; padding: 18px; }
+  .competition-setup .primary-button { grid-column: auto; }
+  .competition-chat { padding: 16px; }
+  .chat-form { grid-template-columns: 1fr; }
+}
+.challenge-inbox { display: grid; gap: 14px; max-width: 1296px; margin: 18px auto 0; padding: 18px; border: 1px solid #dfb39e; background: rgba(255, 253, 248, .9); }
+.challenge-inbox-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.challenge-inbox-heading h2 { font-size: 19px; }
+.challenge-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 16px; border: 1px solid #d9e1da; background: #fffdf8; }
+.challenge-card strong { color: #173c37; font-size: 15px; }
+.challenge-card p { margin-top: 4px; color: #668078; font-size: 13px; line-height: 1.5; }
+.challenge-card p b { color: #315746; }
+.challenge-actions { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; }
+.challenge-actions .primary-button { margin: 0; }
+.challenge-actions button:disabled { cursor: wait; opacity: .65; }
+.app-shell > .competition-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1296px; margin: 12px auto 0; }
+@media (max-width: 860px) {
+  .challenge-inbox { margin-right: 20px; margin-left: 20px; }
+}
+@media (max-width: 560px) {
+  .challenge-inbox { margin-right: 12px; margin-left: 12px; padding: 14px; }
+  .challenge-card, .challenge-actions { align-items: flex-start; flex-direction: column; }
+  .challenge-actions { gap: 10px; }
+}

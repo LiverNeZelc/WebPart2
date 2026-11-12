@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "axios": "^1.21.0",
+    "pyodide": "^314.0.7",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

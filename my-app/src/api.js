@@ -115,6 +115,10 @@ export async function listAlgorithms(search) {
   return request(`/algorithms${suffix}`)
 }
 
+export async function listPublicAlgorithms() {
+  return request('/algorithms/public', {}, false)
+}
+
 export async function createAlgorithm(algorithm) {
   return request('/algorithms', { method: 'POST', body: algorithm })
 }

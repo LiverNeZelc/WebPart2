@@ -1,8 +1,17 @@
 import { useState } from 'react'
+import { validateSortingCode } from '../sorting.js'
 
-const emptyForm = { name: '', type: 'Поиск', description: '', criteria: [] }
+const emptyForm = {
+  name: '',
+  type: 'Поиск',
+  description: '',
+  criteria: [],
+  python_code: '',
+  is_public: false,
+}
 const maxNameLength = 100
 const maxDescriptionLength = 1000
+const maxPythonCodeLength = 12000
 const maxCriteria = 50
 const maxCriterionNameLength = 100
 const maxCriterionDescriptionLength = 2000
@@ -13,6 +22,8 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
       name: algorithm.name,
       type: algorithm.type,
       description: algorithm.description,
+      python_code: algorithm.python_code || '',
+      is_public: Boolean(algorithm.is_public),
       criteria: (algorithm.criteria || []).map((criterion) => ({
         name: criterion.name,
         description: criterion.description || '',
@@ -20,6 +31,7 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
     }
     : emptyForm)
   const [errors, setErrors] = useState({})
+  const [validatingCode, setValidatingCode] = useState(false)
 
   const handleChange = (event) => {
     const { name, value } = event.target
@@ -55,6 +67,12 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
     if (values.description.trim().length > maxDescriptionLength) {
       nextErrors.description = `Описание должно быть не длиннее ${maxDescriptionLength} символов.`
     }
+    if (values.python_code.length > maxPythonCodeLength) {
+      nextErrors.python_code = `Код должен быть не длиннее ${maxPythonCodeLength} символов.`
+    }
+    if (values.is_public && !values.python_code.trim()) {
+      nextErrors.python_code = 'Для публикации добавьте код Python.'
+    }
     values.criteria.forEach((criterion, index) => {
       if (!criterion.name.trim()) {
         nextErrors[`criterion-${index}-name`] = 'Введите название критерия.'
@@ -71,10 +89,24 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
     }
 
     setErrors({})
+    if (values.type === 'Сортировка' && values.python_code.trim()) {
+      setValidatingCode(true)
+      try {
+        await validateSortingCode(values.python_code)
+      } catch (error) {
+        setErrors({ ...nextErrors, python_code: error.message })
+        setValidatingCode(false)
+        return
+      }
+      setValidatingCode(false)
+    }
+
     const saved = await onSubmit({
       name: values.name.trim(),
       type: values.type,
       description: values.description.trim(),
+      python_code: values.type === 'Сортировка' ? values.python_code : '',
+      is_public: values.type === 'Сортировка' && values.is_public,
       criteria: values.criteria.map((criterion) => ({
         name: criterion.name.trim(),
         description: criterion.description.trim(),
@@ -94,12 +126,17 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
           <h2>{algorithm ? 'Редактировать алгоритм' : 'Добавить алгоритм'}</h2>
         </div>
         {algorithm && (
-          <button type="button" className="text-button" onClick={onCancel} disabled={saving}>
+          <button type="button" className="text-button" onClick={onCancel} disabled={saving || validatingCode}>
             Отменить
           </button>
         )}
       </div>
-      <div className="form-grid">
+      {validatingCode && (
+        <p className="validation-status" role="status">
+          Компилируем код и проверяем сортировку на тестовых массивах...
+        </p>
+      )}
+      <fieldset className="form-grid algorithm-fields" disabled={saving || validatingCode}>
         <label>
           <span>Название</span>
           <input
@@ -124,6 +161,43 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
             <option>Другое</option>
           </select>
         </label>
+        {values.type === 'Сортировка' && (
+          <>
+            <label className="wide">
+              <span>Код сортировки на Python (необязательно)</span>
+              <textarea
+                name="python_code"
+                value={values.python_code}
+                onChange={handleChange}
+                placeholder={'def sort_steps(values):\n    for i in range(len(values) - 1):\n        for j in range(len(values) - i - 1):\n            if values[j] > values[j + 1]:\n                values[j], values[j + 1] = values[j + 1], values[j]\n                yield values.copy()\n    yield values.copy()'}
+                maxLength={maxPythonCodeLength}
+                rows="8"
+                spellCheck="false"
+                aria-invalid={Boolean(errors.python_code)}
+                aria-describedby="algorithm-code-hint algorithm-code-error"
+              />
+              <span id="algorithm-code-hint" className="field-hint">
+                Перед сохранением код будет проверен на синтаксис и сортировку нескольких массивов. Генератор <code>sort_steps(values)</code> должен выдавать снимки через <code>yield</code>. {values.python_code.length}/{maxPythonCodeLength}
+              </span>
+              {errors.python_code && (
+                <span id="algorithm-code-error" className="field-error" role="alert">
+                  {errors.python_code}
+                </span>
+              )}
+            </label>
+            <label className="visibility-toggle wide">
+              <input
+                type="checkbox"
+                checked={values.is_public}
+                onChange={(event) => {
+                  setValues((current) => ({ ...current, is_public: event.target.checked }))
+                  setErrors((current) => ({ ...current, python_code: '' }))
+                }}
+              />
+              <span>Опубликовать алгоритм и его код во вкладке «Сортировки»</span>
+            </label>
+          </>
+        )}
         <label className="wide">
           <span>Описание</span>
           <textarea
@@ -212,9 +286,11 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
             {values.criteria.length >= maxCriteria ? 'Достигнут лимит критериев' : 'Добавить критерий'}
           </button>
         </fieldset>
-      </div>
-      <button className="primary-button" type="submit" disabled={saving}>
-        {saving ? 'Сохраняем...' : algorithm ? 'Сохранить изменения' : 'Добавить в каталог'}
+      </fieldset>
+      <button className="primary-button" type="submit" disabled={saving || validatingCode}>
+        {validatingCode
+          ? 'Проверяем сортировку...'
+          : saving ? 'Сохраняем...' : algorithm ? 'Сохранить изменения' : 'Добавить в каталог'}
       </button>
     </form>
   )

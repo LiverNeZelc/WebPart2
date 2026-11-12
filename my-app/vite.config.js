@@ -13,6 +13,11 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, ''),
         },
+        '/ws': {
+          target: env.VITE_DEV_API_PROXY_TARGET || 'http://localhost:3000',
+          changeOrigin: true,
+          ws: true,
+        },
       },
     },
   }

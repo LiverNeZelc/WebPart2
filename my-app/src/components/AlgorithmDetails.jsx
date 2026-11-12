@@ -9,6 +9,12 @@ function AlgorithmDetails({ algorithm }) {
             <span className="type-label">{algorithm.type}</span>
           </div>
           <p className="description">{algorithm.description}</p>
+          {algorithm.type === 'Сортировка' && algorithm.python_code && (
+            <section className="criteria-details" aria-label="Код сортировки на Python">
+              <h3>Код Python {algorithm.is_public && <span className="public-code-label">Публичный</span>}</h3>
+              <pre className="python-code">{algorithm.python_code}</pre>
+            </section>
+          )}
           {algorithm.criteria?.length > 0 && (
             <section className="criteria-details" aria-label="Критерии алгоритма">
               <h3>Критерии</h3>
