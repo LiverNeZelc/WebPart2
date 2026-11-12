@@ -24,6 +24,19 @@ const server = http.createServer(app);
 app.use(express.json({ limit: '256kb' }));
 app.use('/pyodide', express.static(path.join(__dirname, 'my-app', 'node_modules', 'pyodide')));
 
+app.get('/health', async (req, res) => {
+    if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({ status: 'unhealthy' });
+    }
+
+    await Promise.all([
+        sequelize.authenticate(),
+        mongoose.connection.db.admin().ping()
+    ]);
+
+    res.json({ status: 'ok' });
+});
+
 app.use('/auth', authRouter);
 app.use('/algorithms', createAlgorithmRoutes(Algorithm, authenticate));
 createSortCompetition(server, Algorithm, User, verifyAccessToken);

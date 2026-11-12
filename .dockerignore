@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+!.env.example
+atlas-credentials.env
+node_modules
+my-app/node_modules
+my-app/dist
+my-app/.env
+my-app/.env.*

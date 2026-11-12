@@ -39,6 +39,26 @@
    npm run dev
    ```
 
+## Запуск в Docker
+
+Из корня проекта соберите и запустите frontend, backend, PostgreSQL и MongoDB:
+
+```bash
+docker compose up --build
+```
+
+Откройте frontend на `http://localhost`. Backend доступен на
+`http://localhost:3000`, проверка состояния — `http://localhost:3000/health`.
+При первом запуске backend применяет миграции PostgreSQL автоматически.
+Состояние контейнеров можно проверить командой `docker compose ps`; остановить
+сервисы — `docker compose down` (данные в volumes при этом сохраняются).
+
+Для локального стенда используются значения подключения и JWT-секрет по
+умолчанию. Переопределите `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
+и `JWT_SECRET` в корневом `.env`, если нужны другие значения. Эти настройки
+предназначены только для разработки; реальные секреты не добавляйте в Git.
+Порты frontend/backend можно изменить через `FRONTEND_PORT` и `BACKEND_PORT`.
+
 Vite проксирует `/api` на `http://localhost:3000`, поэтому браузеру не требуется
 отдельная настройка CORS. Если сервер запущен на другом адресе, задайте
 `VITE_DEV_API_PROXY_TARGET` в `my-app/.env`. При необходимости URL API можно
