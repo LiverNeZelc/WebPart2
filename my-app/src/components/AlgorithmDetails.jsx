@@ -1,3 +1,6 @@
+import GraphCanvas from './GraphCanvas.jsx'
+import { graphSummary } from '../graphLabels.js'
+
 function AlgorithmDetails({ algorithm }) {
   return (
     <section className="details-panel" aria-live="polite">
@@ -13,6 +16,15 @@ function AlgorithmDetails({ algorithm }) {
             <section className="criteria-details" aria-label="Код сортировки на Python">
               <h3>Код Python {algorithm.is_public && <span className="public-code-label">Публичный</span>}</h3>
               <pre className="python-code">{algorithm.python_code}</pre>
+            </section>
+          )}
+          {algorithm.type === 'Графы' && algorithm.graph && (
+            <section className="criteria-details" aria-label="Граф">
+              <h3>Структура графа</h3>
+              <p className="field-hint">
+                {algorithm.graph.directed ? 'Ориентированный' : 'Неориентированный'} граф · {graphSummary(algorithm.graph)}
+              </p>
+              <GraphCanvas graph={algorithm.graph} mode="view" onVertexClick={() => {}} />
             </section>
           )}
           {algorithm.criteria?.length > 0 && (

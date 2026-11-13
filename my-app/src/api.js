@@ -130,3 +130,19 @@ export async function updateAlgorithm(id, algorithm) {
 export async function deleteAlgorithm(id) {
   return request(`/algorithms/${id}`, { method: 'DELETE' })
 }
+
+export async function listGraphs() {
+  return request('/graphs')
+}
+
+export async function createGraph(graph) {
+  return request('/graphs', { method: 'POST', body: graph })
+}
+
+export async function updateGraph(id, graph) {
+  return request(`/graphs/${id}`, { method: 'PUT', body: graph })
+}
+
+export async function deleteGraph(id) {
+  return request(`/graphs/${id}`, { method: 'DELETE' })
+}

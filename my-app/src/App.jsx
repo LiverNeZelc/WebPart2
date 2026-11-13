@@ -1,15 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { authenticate, clearSession, createAlgorithm, deleteAlgorithm, getSession, listAlgorithms, listPublicAlgorithms, updateAlgorithm } from './api.js'
+import { authenticate, clearSession, createAlgorithm, createGraph, deleteAlgorithm, deleteGraph, getSession, listAlgorithms, listGraphs, listPublicAlgorithms, updateAlgorithm, updateGraph } from './api.js'
 import AlgorithmForm from './components/AlgorithmForm.jsx'
 import AlgorithmList from './components/AlgorithmList.jsx'
 import AuthForm from './components/AuthForm.jsx'
 import AlgorithmDetails from './components/AlgorithmDetails.jsx'
 import SortCatalog from './components/SortCatalog.jsx'
 import SortCompetition from './components/SortCompetition.jsx'
+import GraphStudio from './components/GraphStudio.jsx'
 import './App.css'
 
 const mutationFeedbackDuration = 1000
 const apiUrl = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
+
+const toGraphCard = (graph) => ({
+  ...graph,
+  id: `graph:${graph.id}`,
+  graphId: graph.id,
+  type: 'Графы',
+  graph: {
+    directed: graph.directed,
+    vertices: graph.vertices || [],
+    edges: graph.edges || [],
+  },
+  python_code: '',
+  is_public: false,
+  criteria: [],
+})
 
 async function waitForMutationResponse(request) {
   const [result] = await Promise.allSettled([
@@ -187,7 +203,10 @@ function App() {
       setLoading(true)
       setLoadError('')
       try {
-        const items = await listAlgorithms(debouncedQuery)
+        const [items, graphItems] = await Promise.all([
+          listAlgorithms(debouncedQuery),
+          listGraphs(),
+        ])
         if (!active) return
         if (pendingMutations.current > 0 || requestMutationVersion !== mutationVersion.current) {
           refreshAfterMutation.current = true
@@ -197,9 +216,17 @@ function App() {
           }
           return
         }
-        setAlgorithms(items)
+        const searchTerm = debouncedQuery.toLocaleLowerCase('ru')
+        const matchingGraphs = graphItems
+          .filter((graph) => !searchTerm
+            || `${graph.name} ${graph.description} Графы`.toLocaleLowerCase('ru').includes(searchTerm))
+          .map(toGraphCard)
+        const catalogItems = [...items, ...matchingGraphs]
+        setAlgorithms(catalogItems)
         setSelectedId((currentId) =>
-          items.some((item) => item.id === currentId) ? currentId : (items[0]?.id ?? null),
+          catalogItems.some((item) => item.id === currentId)
+            ? currentId
+            : (catalogItems[0]?.id ?? null),
         )
       } catch (error) {
         if (active) setLoadError(error.message)
@@ -270,7 +297,53 @@ function App() {
     }
   }
 
+  const handleSaveGraph = async (values) => {
+    beginMutation()
+    const original = editingAlgorithm
+    const graph = {
+      name: values.name,
+      description: values.description,
+      directed: values.graph.directed,
+      vertices: values.graph.vertices,
+      edges: values.graph.edges,
+    }
+
+    try {
+      const saved = await waitForMutationResponse(original?.graphId
+        ? updateGraph(original.graphId, graph)
+        : createGraph(graph))
+      const graphCard = toGraphCard(saved)
+      let cleanupWarning = ''
+      if (original?.type === 'Графы' && !original.graphId) {
+        try {
+          await waitForMutationResponse(deleteAlgorithm(original.id))
+        } catch (error) {
+          cleanupWarning = `Граф создан, но старую пустую карточку удалить не удалось: ${error.message}`
+        }
+      }
+
+      setAlgorithms((items) => original
+        ? items.map((item) => item.id === original.id ? graphCard : item)
+        : [...items, graphCard])
+      setSelectedId(graphCard.id)
+      setEditingAlgorithm(null)
+      setNotice(cleanupWarning || (original ? 'Изменения графа сохранены' : 'Граф добавлен в каталог'))
+      setNoticeIsError(Boolean(cleanupWarning))
+      setConnectionState('connected')
+      return true
+    } catch (error) {
+      const unavailable = error.status === 0 || error.status >= 500
+      setNotice(unavailable ? 'Сервер недоступен. Изменения графа не сохранены.' : error.message)
+      setNoticeIsError(true)
+      setConnectionState(unavailable ? 'unavailable' : 'error')
+      return false
+    } finally {
+      finishMutation()
+    }
+  }
+
   const handleSave = async (values) => {
+    if (values.type === 'Графы') return handleSaveGraph(values)
     beginMutation()
 
     if (editingAlgorithm) {
@@ -340,7 +413,9 @@ function App() {
     setNotice('')
 
     try {
-      await waitForMutationResponse(deleteAlgorithm(algorithm.id))
+      await waitForMutationResponse(algorithm.graphId
+        ? deleteGraph(algorithm.graphId)
+        : deleteAlgorithm(algorithm.id))
       if (algorithm.is_public) setPublicReloadCount((count) => count + 1)
       setNotice('Алгоритм удалён')
       setNoticeIsError(false)
@@ -449,6 +524,14 @@ function App() {
         </button>
         <button
           type="button"
+          className={activeTab === 'graphs' ? 'active' : ''}
+          aria-current={activeTab === 'graphs' ? 'page' : undefined}
+          onClick={() => setActiveTab('graphs')}
+        >
+          Обход графа
+        </button>
+        <button
+          type="button"
           className={activeTab === 'competition' ? 'active' : ''}
           aria-current={activeTab === 'competition' ? 'page' : undefined}
           onClick={() => setActiveTab('competition')}
@@ -521,6 +604,10 @@ function App() {
       {activeTab === 'competition' && !session && (
         <AuthForm onSubmit={handleAuthentication} error={authError} />
       )}
+      {activeTab === 'graphs' && !session && (
+        <AuthForm onSubmit={handleAuthentication} error={authError} />
+      )}
+      {activeTab === 'graphs' && session && <GraphStudio onOpenLibrary={() => setActiveTab('library')} />}
       {session && (
         <div hidden={activeTab !== 'competition'}>
           <SortCompetition
