@@ -9,9 +9,11 @@ const { Sequelize, DataTypes } = require('sequelize');
 const userModel = require('./models/user');
 const Algorithm = require('./models/algorithm');
 const Graph = require('./models/graph');
+const Tree = require('./models/tree');
 const createAuth = require('./auth');
 const createAlgorithmRoutes = require('./routes/algorithms');
 const createGraphRoutes = require('./routes/graphs');
+const createTreeRoutes = require('./routes/trees');
 const createSortCompetition = require('./services/sortCompetition');
 
 const app = express();
@@ -42,6 +44,7 @@ app.get('/health', async (req, res) => {
 app.use('/auth', authRouter);
 app.use('/algorithms', createAlgorithmRoutes(Algorithm, authenticate));
 app.use('/graphs', createGraphRoutes(Graph, authenticate));
+app.use('/trees', createTreeRoutes(Tree, authenticate));
 createSortCompetition(server, Algorithm, User, verifyAccessToken);
 
 app.use((req, res) => {

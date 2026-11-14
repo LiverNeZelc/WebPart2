@@ -1,17 +1,20 @@
 import { useState } from 'react'
 import { validateSortingCode } from '../sorting.js'
 import GraphEditor from './GraphEditor.jsx'
+import TreeEditor from './TreeEditor.jsx'
+import { parseTreeItems } from '../treeAlgorithms.js'
 
 const emptyGraph = { directed: false, vertices: [], edges: [] }
 
 const emptyForm = {
   name: '',
-  type: 'Поиск',
+  type: 'Деревья',
   description: '',
   criteria: [],
   python_code: '',
   is_public: false,
   graph: emptyGraph,
+  tree: { kind: 'BST', items: [] },
 }
 const maxNameLength = 100
 const maxDescriptionLength = 1000
@@ -29,6 +32,7 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
       python_code: algorithm.python_code || '',
       is_public: Boolean(algorithm.is_public),
       graph: algorithm.graph || emptyGraph,
+      tree: algorithm.tree || { kind: 'BST', items: [] },
       criteria: (algorithm.criteria || []).map((criterion) => ({
         name: criterion.name,
         description: criterion.description || '',
@@ -81,6 +85,13 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
     if (values.type === 'Графы' && values.graph.vertices.length === 0) {
       nextErrors.graph = 'Добавьте на поле хотя бы одну вершину.'
     }
+    if (values.type === 'Деревья') {
+      try {
+        parseTreeItems(values.tree.inputText ?? values.tree.items.join(', '), values.tree.kind)
+      } catch (error) {
+        nextErrors.tree = error.message
+      }
+    }
     values.criteria.forEach((criterion, index) => {
       if (!criterion.name.trim()) {
         nextErrors[`criterion-${index}-name`] = 'Введите название критерия.'
@@ -116,6 +127,12 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
       python_code: values.type === 'Сортировка' ? values.python_code : '',
       is_public: values.type === 'Сортировка' && values.is_public,
       ...(values.type === 'Графы' ? { graph: values.graph } : {}),
+      ...(values.type === 'Деревья' ? {
+        tree: {
+          ...values.tree,
+          items: parseTreeItems(values.tree.inputText ?? values.tree.items.join(', '), values.tree.kind),
+        },
+      } : {}),
       criteria: values.criteria.map((criterion) => ({
         name: criterion.name.trim(),
         description: criterion.description.trim(),
@@ -163,10 +180,11 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
         </label>
         <label>
           <span>Тип</span>
-          <select name="type" value={values.type} onChange={handleChange}>
-            <option>Поиск</option>
+          <select name="type" value={values.type} onChange={handleChange} disabled={Boolean(algorithm?.treeId)}>
+            {values.type === 'Поиск' && <option>Поиск</option>}
             <option>Сортировка</option>
             <option>Графы</option>
+            <option>Деревья</option>
             <option>Другое</option>
           </select>
         </label>
@@ -219,6 +237,18 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
             {errors.graph && <span className="field-error" role="alert">{errors.graph}</span>}
           </div>
         )}
+        {values.type === 'Деревья' && (
+          <div className="wide">
+            <TreeEditor
+              tree={values.tree}
+              error={errors.tree}
+              onChange={(tree) => {
+                setValues((current) => ({ ...current, tree }))
+                setErrors((current) => ({ ...current, tree: '' }))
+              }}
+            />
+          </div>
+        )}
         <label className="wide">
           <span>Описание</span>
           <textarea
@@ -241,7 +271,7 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
             </span>
           )}
         </label>
-        {values.type !== 'Графы' && (
+        {!['Графы', 'Деревья'].includes(values.type) && (
           <fieldset className="criteria-fieldset wide">
             <legend>Критерии алгоритма</legend>
             <p className="field-hint">

@@ -24,11 +24,18 @@ function GraphCanvas({
 }) {
   const svgRef = useRef(null)
   const draggedVertex = useRef(null)
+  const suppressClick = useRef(false)
 
   const handlePointerMove = (event) => {
     if (!draggedVertex.current || !svgRef.current) return
     const point = getSvgPoint(svgRef.current, event)
-    onVertexMove(draggedVertex.current, {
+    if (Math.hypot(
+      event.clientX - draggedVertex.current.startX,
+      event.clientY - draggedVertex.current.startY,
+    ) > 3) {
+      draggedVertex.current.moved = true
+    }
+    onVertexMove(draggedVertex.current.id, {
       x: Math.max(24, Math.min(776, point.x)),
       y: Math.max(24, Math.min(416, point.y)),
     })
@@ -37,7 +44,7 @@ function GraphCanvas({
   return (
     <svg
       ref={svgRef}
-      className={`graph-canvas ${mode === 'add' ? 'graph-canvas-add' : ''}`}
+      className={`graph-canvas ${mode === 'add' ? 'graph-canvas-add' : ''} ${mode === 'delete' ? 'graph-canvas-delete' : ''}`}
       viewBox="0 0 800 440"
       role="img"
       aria-label="Поле графа. Вершины можно перемещать мышью."
@@ -47,8 +54,14 @@ function GraphCanvas({
         onCanvasClick({ x: Math.max(24, Math.min(776, point.x)), y: Math.max(24, Math.min(416, point.y)) })
       }}
       onPointerMove={handlePointerMove}
-      onPointerUp={() => { draggedVertex.current = null }}
-      onPointerCancel={() => { draggedVertex.current = null }}
+      onPointerUp={() => {
+        suppressClick.current = Boolean(draggedVertex.current?.moved)
+        draggedVertex.current = null
+      }}
+      onPointerCancel={() => {
+        draggedVertex.current = null
+        suppressClick.current = false
+      }}
     >
       <defs>
         <marker id="graph-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
@@ -92,13 +105,23 @@ function GraphCanvas({
             className={`graph-vertex graph-vertex-${status} ${selectedVertex === vertex.id ? 'graph-vertex-selected' : ''} ${connectFrom === vertex.id ? 'graph-vertex-connect' : ''}`}
             transform={`translate(${vertex.x} ${vertex.y})`}
             onPointerDown={(event) => {
-              if (mode !== 'edit' || event.button !== 0) return
+              if (!['edit', 'delete'].includes(mode) || event.button !== 0) return
               event.stopPropagation()
-              draggedVertex.current = vertex.id
+              if (mode === 'delete') return
+              draggedVertex.current = {
+                id: vertex.id,
+                startX: event.clientX,
+                startY: event.clientY,
+                moved: false,
+              }
               event.currentTarget.setPointerCapture(event.pointerId)
             }}
             onClick={(event) => {
               event.stopPropagation()
+              if (suppressClick.current) {
+                suppressClick.current = false
+                return
+              }
               onVertexClick(vertex.id)
             }}
           >

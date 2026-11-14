@@ -146,3 +146,19 @@ export async function updateGraph(id, graph) {
 export async function deleteGraph(id) {
   return request(`/graphs/${id}`, { method: 'DELETE' })
 }
+
+export async function listTrees() {
+  return request('/trees')
+}
+
+export async function createTree(tree) {
+  return request('/trees', { method: 'POST', body: tree })
+}
+
+export async function updateTree(id, tree) {
+  return request(`/trees/${id}`, { method: 'PUT', body: tree })
+}
+
+export async function deleteTree(id) {
+  return request(`/trees/${id}`, { method: 'DELETE' })
+}

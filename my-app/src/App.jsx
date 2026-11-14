@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { authenticate, clearSession, createAlgorithm, createGraph, deleteAlgorithm, deleteGraph, getSession, listAlgorithms, listGraphs, listPublicAlgorithms, updateAlgorithm, updateGraph } from './api.js'
+import { authenticate, clearSession, createAlgorithm, createGraph, createTree, deleteAlgorithm, deleteGraph, deleteTree, getSession, listAlgorithms, listGraphs, listPublicAlgorithms, listTrees, updateAlgorithm, updateGraph, updateTree } from './api.js'
 import AlgorithmForm from './components/AlgorithmForm.jsx'
 import AlgorithmList from './components/AlgorithmList.jsx'
 import AuthForm from './components/AuthForm.jsx'
@@ -7,6 +7,7 @@ import AlgorithmDetails from './components/AlgorithmDetails.jsx'
 import SortCatalog from './components/SortCatalog.jsx'
 import SortCompetition from './components/SortCompetition.jsx'
 import GraphStudio from './components/GraphStudio.jsx'
+import TreeStudio from './components/TreeStudio.jsx'
 import './App.css'
 
 const mutationFeedbackDuration = 1000
@@ -22,6 +23,17 @@ const toGraphCard = (graph) => ({
     vertices: graph.vertices || [],
     edges: graph.edges || [],
   },
+  python_code: '',
+  is_public: false,
+  criteria: [],
+})
+
+const toTreeCard = (tree) => ({
+  ...tree,
+  id: `tree:${tree.id}`,
+  treeId: tree.id,
+  type: 'Деревья',
+  tree: { kind: tree.kind, items: tree.items || [] },
   python_code: '',
   is_public: false,
   criteria: [],
@@ -203,9 +215,10 @@ function App() {
       setLoading(true)
       setLoadError('')
       try {
-        const [items, graphItems] = await Promise.all([
+        const [items, graphItems, treeItems] = await Promise.all([
           listAlgorithms(debouncedQuery),
           listGraphs(),
+          listTrees(),
         ])
         if (!active) return
         if (pendingMutations.current > 0 || requestMutationVersion !== mutationVersion.current) {
@@ -221,7 +234,11 @@ function App() {
           .filter((graph) => !searchTerm
             || `${graph.name} ${graph.description} Графы`.toLocaleLowerCase('ru').includes(searchTerm))
           .map(toGraphCard)
-        const catalogItems = [...items, ...matchingGraphs]
+        const matchingTrees = treeItems
+          .filter((tree) => !searchTerm
+            || `${tree.name} ${tree.description} Деревья`.toLocaleLowerCase('ru').includes(searchTerm))
+          .map(toTreeCard)
+        const catalogItems = [...items, ...matchingGraphs, ...matchingTrees]
         setAlgorithms(catalogItems)
         setSelectedId((currentId) =>
           catalogItems.some((item) => item.id === currentId)
@@ -342,8 +359,44 @@ function App() {
     }
   }
 
+  const handleSaveTree = async (values) => {
+    beginMutation()
+    const original = editingAlgorithm
+    const tree = {
+      name: values.name,
+      description: values.description,
+      kind: values.tree.kind,
+      items: values.tree.items,
+    }
+
+    try {
+      const saved = await waitForMutationResponse(original?.treeId
+        ? updateTree(original.treeId, tree)
+        : createTree(tree))
+      const treeCard = toTreeCard(saved)
+      setAlgorithms((items) => original?.treeId
+        ? items.map((item) => item.id === original.id ? treeCard : item)
+        : [...items, treeCard])
+      setSelectedId(treeCard.id)
+      setEditingAlgorithm(null)
+      setNotice(original?.treeId ? 'Изменения дерева сохранены' : 'Дерево добавлено в каталог')
+      setNoticeIsError(false)
+      setConnectionState('connected')
+      return true
+    } catch (error) {
+      const unavailable = error.status === 0 || error.status >= 500
+      setNotice(unavailable ? 'Сервер недоступен. Изменения дерева не сохранены.' : error.message)
+      setNoticeIsError(true)
+      setConnectionState(unavailable ? 'unavailable' : 'error')
+      return false
+    } finally {
+      finishMutation()
+    }
+  }
+
   const handleSave = async (values) => {
     if (values.type === 'Графы') return handleSaveGraph(values)
+    if (values.type === 'Деревья') return handleSaveTree(values)
     beginMutation()
 
     if (editingAlgorithm) {
@@ -415,9 +468,11 @@ function App() {
     try {
       await waitForMutationResponse(algorithm.graphId
         ? deleteGraph(algorithm.graphId)
-        : deleteAlgorithm(algorithm.id))
+        : algorithm.treeId
+          ? deleteTree(algorithm.treeId)
+          : deleteAlgorithm(algorithm.id))
       if (algorithm.is_public) setPublicReloadCount((count) => count + 1)
-      setNotice('Алгоритм удалён')
+      setNotice(algorithm.treeId ? 'Дерево удалено' : algorithm.graphId ? 'Граф удалён' : 'Алгоритм удалён')
       setNoticeIsError(false)
       setConnectionState('connected')
     } catch (error) {
@@ -532,6 +587,14 @@ function App() {
         </button>
         <button
           type="button"
+          className={activeTab === 'trees' ? 'active' : ''}
+          aria-current={activeTab === 'trees' ? 'page' : undefined}
+          onClick={() => setActiveTab('trees')}
+        >
+          Поиск в дереве
+        </button>
+        <button
+          type="button"
           className={activeTab === 'competition' ? 'active' : ''}
           aria-current={activeTab === 'competition' ? 'page' : undefined}
           onClick={() => setActiveTab('competition')}
@@ -607,7 +670,11 @@ function App() {
       {activeTab === 'graphs' && !session && (
         <AuthForm onSubmit={handleAuthentication} error={authError} />
       )}
+      {activeTab === 'trees' && !session && (
+        <AuthForm onSubmit={handleAuthentication} error={authError} />
+      )}
       {activeTab === 'graphs' && session && <GraphStudio onOpenLibrary={() => setActiveTab('library')} />}
+      {activeTab === 'trees' && session && <TreeStudio onOpenLibrary={() => setActiveTab('library')} reloadCount={reloadCount} />}
       {session && (
         <div hidden={activeTab !== 'competition'}>
           <SortCompetition
