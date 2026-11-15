@@ -57,7 +57,7 @@ function AlgorithmList({
         )
       })}
       {!loading && !error && algorithms.length === 0 && (
-        <p className="empty-state">В каталоге пока нет алгоритмов. Добавьте первый через форму.</p>
+        <p className="empty-state">В каталоге пока нет алгоритмов. Нажмите «+» рядом с заголовком.</p>
       )}
     </div>
   )

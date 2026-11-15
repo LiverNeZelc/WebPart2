@@ -68,8 +68,11 @@ function TreeEditor({ tree, onChange, error }) {
         </div>
         <div className="tree-preview">
           <div className="tree-preview-heading">
-            <span>Предпросмотр</span>
-            <strong>{kind.name}</strong>
+            <div>
+              <p className="eyebrow">Предпросмотр</p>
+              <strong>{kind.name}</strong>
+            </div>
+            <span>{model.nodes.length} узлов</span>
           </div>
           <TreeCanvas model={model} compact />
         </div>

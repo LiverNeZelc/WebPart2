@@ -7,6 +7,14 @@
   -webkit-font-smoothing: antialiased;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  color: #e7eee9;
+  background: #111815;
+}
+
+:root[data-theme="dark"] body { background: #111815; }
+
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
 button, input, select, textarea { font: inherit; }

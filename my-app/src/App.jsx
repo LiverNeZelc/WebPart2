@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { authenticate, clearSession, createAlgorithm, createGraph, createTree, deleteAlgorithm, deleteGraph, deleteTree, getSession, listAlgorithms, listGraphs, listPublicAlgorithms, listTrees, updateAlgorithm, updateGraph, updateTree } from './api.js'
+import { authenticate, clearSession, createAlgorithm, createGraph, createTree, deleteAlgorithm, deleteGraph, deleteTree, getAccessToken, listAlgorithms, listGraphs, listPublicAlgorithms, listTrees, logout as logoutSession, restoreSession, updateAlgorithm, updateGraph, updateTree } from './api.js'
 import AlgorithmForm from './components/AlgorithmForm.jsx'
 import AlgorithmList from './components/AlgorithmList.jsx'
 import AuthForm from './components/AuthForm.jsx'
@@ -49,6 +49,9 @@ async function waitForMutationResponse(request) {
 }
 
 function App() {
+  const [theme, setTheme] = useState(() => (
+    localStorage.getItem('algorithm-library-theme') === 'dark' ? 'dark' : 'light'
+  ))
   const [session, setSession] = useState(null)
   const [restoringSession, setRestoringSession] = useState(true)
   const [algorithms, setAlgorithms] = useState([])
@@ -62,6 +65,7 @@ function App() {
   const [socketError, setSocketError] = useState('')
   const [challenges, setChallenges] = useState([])
   const [selectedId, setSelectedId] = useState(null)
+  const [addingAlgorithm, setAddingAlgorithm] = useState(false)
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [sortOrder, setSortOrder] = useState('name')
@@ -78,7 +82,7 @@ function App() {
   const pendingMutations = useRef(0)
   const refreshAfterMutation = useRef(false)
   const sortSocketRef = useRef(null)
-  const accessToken = session?.accessToken
+  const accessToken = session ? getAccessToken() : null
 
   useEffect(() => {
     let active = true
@@ -109,7 +113,7 @@ function App() {
     let active = true
     const apiRoot = new URL(apiUrl, window.location.href)
     const websocketUrl = new URL('/ws/sort', apiRoot)
-    websocketUrl.protocol = websocketUrl.protocol === 'https:' ? 'wss:' : 'ws:'
+    websocketUrl.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const socket = new WebSocket(websocketUrl)
     sortSocketRef.current = socket
 
@@ -183,7 +187,7 @@ function App() {
 
     const restore = async () => {
       try {
-        const savedSession = getSession()
+        const savedSession = await restoreSession()
         if (savedSession && active) setSession(savedSession)
       } catch (error) {
         if (active) setAuthError(error.message)
@@ -260,6 +264,13 @@ function App() {
     document.title = `Библиотека алгоритмов · ${algorithms.length}`
   }, [algorithms.length])
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('algorithm-library-theme', theme)
+    const themeColor = document.querySelector('meta[name="theme-color"]')
+    if (themeColor) themeColor.setAttribute('content', theme === 'dark' ? '#111815' : '#173c37')
+  }, [theme])
+
   const visibleAlgorithms = useMemo(() => [...algorithms].sort((first, second) => (
     sortOrder === 'type'
       ? first.type.localeCompare(second.type, 'ru')
@@ -283,18 +294,27 @@ function App() {
     }
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     sortSocketRef.current?.close()
     setSortSocket(null)
-    clearSession()
+    let logoutError = ''
+    try {
+      await logoutSession()
+    } catch (error) {
+      logoutError = error.message
+      clearSession()
+    }
     setSession(null)
     setActiveTab('library')
     setAlgorithms([])
     setSelectedId(null)
     setEditingAlgorithm(null)
+    setAddingAlgorithm(false)
     setChallenges([])
-    setNotice('Вы вышли из аккаунта')
-    setNoticeIsError(false)
+    setNotice(logoutError
+      ? `Локальный сеанс завершён, но сервер не подтвердил отзыв refresh-токена: ${logoutError}`
+      : 'Вы вышли из аккаунта')
+    setNoticeIsError(Boolean(logoutError))
   }
 
   const beginMutation = () => {
@@ -344,6 +364,7 @@ function App() {
         : [...items, graphCard])
       setSelectedId(graphCard.id)
       setEditingAlgorithm(null)
+      setAddingAlgorithm(false)
       setNotice(cleanupWarning || (original ? 'Изменения графа сохранены' : 'Граф добавлен в каталог'))
       setNoticeIsError(Boolean(cleanupWarning))
       setConnectionState('connected')
@@ -379,6 +400,7 @@ function App() {
         : [...items, treeCard])
       setSelectedId(treeCard.id)
       setEditingAlgorithm(null)
+      setAddingAlgorithm(false)
       setNotice(original?.treeId ? 'Изменения дерева сохранены' : 'Дерево добавлено в каталог')
       setNoticeIsError(false)
       setConnectionState('connected')
@@ -409,6 +431,7 @@ function App() {
         setAlgorithms((items) => items.map((item) => item.id === original.id ? updated : item))
         setPublicReloadCount((count) => count + 1)
         setEditingAlgorithm(null)
+        setAddingAlgorithm(false)
         setNotice('Изменения сохранены')
         setNoticeIsError(false)
         setConnectionState('connected')
@@ -438,6 +461,7 @@ function App() {
       setAlgorithms((items) => items.map((item) => item.id === temporaryId ? created : item))
       setPublicReloadCount((count) => count + 1)
       setSelectedId(created.id)
+      setAddingAlgorithm(false)
       setNotice('Алгоритм добавлен')
       setNoticeIsError(false)
       setConnectionState('connected')
@@ -502,6 +526,8 @@ function App() {
     setSession(null)
     setAlgorithms([])
     setSelectedId(null)
+    setEditingAlgorithm(null)
+    setAddingAlgorithm(false)
     setChallenges([])
     setAuthError('Срок действия сеанса истёк. Войдите снова.')
   }, [])
@@ -531,11 +557,11 @@ function App() {
   }, [handleAuthExpired])
 
   if (restoringSession) {
-    return <main className="app-shell"><p className="page-message" role="status">Проверяем сеанс...</p></main>
+    return <main className="app-shell" data-theme={theme}><p className="page-message" role="status">Проверяем сеанс...</p></main>
   }
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" data-theme={theme}>
       <header className="topbar">
         <div className="brand-mark" aria-hidden="true">AL</div>
         <div>
@@ -558,50 +584,71 @@ function App() {
             <button type="button" className="text-button" onClick={handleLogout}>Выйти</button>
           </div>
         )}
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}
+          aria-label={`Переключить на ${theme === 'dark' ? 'светлую' : 'тёмную'} тему`}
+          title={`Переключить на ${theme === 'dark' ? 'светлую' : 'тёмную'} тему`}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            {theme === 'dark' ? (
+              <>
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
+              </>
+            ) : (
+              <path d="M20.2 15.1A8.5 8.5 0 0 1 8.9 3.8 8.6 8.6 0 1 0 20.2 15.1Z" />
+            )}
+          </svg>
+          <span>{theme === 'dark' ? 'Светлая' : 'Тёмная'}</span>
+        </button>
       </header>
 
-      <nav className="main-tabs" aria-label="Разделы сайта">
-        <button
-          type="button"
-          className={activeTab === 'library' ? 'active' : ''}
-          aria-current={activeTab === 'library' ? 'page' : undefined}
-          onClick={() => setActiveTab('library')}
-        >
-          Каталог алгоритмов
-        </button>
-        <button
-          type="button"
-          className={activeTab === 'sorts' ? 'active' : ''}
-          aria-current={activeTab === 'sorts' ? 'page' : undefined}
-          onClick={() => setActiveTab('sorts')}
-        >
-          Сортировки <span>{publicAlgorithms.length}</span>
-        </button>
-        <button
-          type="button"
-          className={activeTab === 'graphs' ? 'active' : ''}
-          aria-current={activeTab === 'graphs' ? 'page' : undefined}
-          onClick={() => setActiveTab('graphs')}
-        >
-          Обход графа
-        </button>
-        <button
-          type="button"
-          className={activeTab === 'trees' ? 'active' : ''}
-          aria-current={activeTab === 'trees' ? 'page' : undefined}
-          onClick={() => setActiveTab('trees')}
-        >
-          Поиск в дереве
-        </button>
-        <button
-          type="button"
-          className={activeTab === 'competition' ? 'active' : ''}
-          aria-current={activeTab === 'competition' ? 'page' : undefined}
-          onClick={() => setActiveTab('competition')}
-        >
-          Соревнование
-        </button>
-      </nav>
+      {session && (
+        <nav className="main-tabs" aria-label="Разделы сайта">
+          <button
+            type="button"
+            className={activeTab === 'library' ? 'active' : ''}
+            aria-current={activeTab === 'library' ? 'page' : undefined}
+            onClick={() => setActiveTab('library')}
+          >
+            Каталог алгоритмов
+          </button>
+          <button
+            type="button"
+            className={activeTab === 'sorts' ? 'active' : ''}
+            aria-current={activeTab === 'sorts' ? 'page' : undefined}
+            onClick={() => setActiveTab('sorts')}
+          >
+            Сортировки <span>{publicAlgorithms.length}</span>
+          </button>
+          <button
+            type="button"
+            className={activeTab === 'graphs' ? 'active' : ''}
+            aria-current={activeTab === 'graphs' ? 'page' : undefined}
+            onClick={() => setActiveTab('graphs')}
+          >
+            Обход графа
+          </button>
+          <button
+            type="button"
+            className={activeTab === 'trees' ? 'active' : ''}
+            aria-current={activeTab === 'trees' ? 'page' : undefined}
+            onClick={() => setActiveTab('trees')}
+          >
+            Поиск в дереве
+          </button>
+          <button
+            type="button"
+            className={activeTab === 'competition' ? 'active' : ''}
+            aria-current={activeTab === 'competition' ? 'page' : undefined}
+            onClick={() => setActiveTab('competition')}
+          >
+            Соревнование
+          </button>
+        </nav>
+      )}
 
       {challenges.length > 0 && (
         <section className="challenge-inbox" aria-label="Приглашения на соревнование">
@@ -700,9 +747,25 @@ function App() {
         <section className="workspace">
           <aside className="sidebar">
             <div className="section-heading">
-              <div>
+              <div className="algorithm-heading-copy">
                 <p className="eyebrow">Ваш каталог</p>
-                <h2>Алгоритмы</h2>
+                <div className="algorithm-heading-title">
+                  <h2>Алгоритмы</h2>
+                  <button
+                    type="button"
+                    className="add-algorithm-button"
+                    onClick={() => {
+                      setEditingAlgorithm(null)
+                      setAddingAlgorithm(true)
+                      setNotice('')
+                    }}
+                    disabled={saving}
+                    aria-label="Добавить алгоритм"
+                    title="Добавить алгоритм"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
               <span className="count-badge">{algorithms.length}</span>
             </div>
@@ -730,8 +793,15 @@ function App() {
               selectedId={selectedId}
               loading={loading}
               error={loadError}
-              onSelect={setSelectedId}
-              onEdit={setEditingAlgorithm}
+              onSelect={(id) => {
+                setSelectedId(id)
+                setEditingAlgorithm(null)
+                setAddingAlgorithm(false)
+              }}
+              onEdit={(algorithm) => {
+                setEditingAlgorithm(algorithm)
+                setAddingAlgorithm(false)
+              }}
               onDelete={handleDelete}
               onRetry={() => setReloadCount((count) => count + 1)}
               disabled={saving}
@@ -747,14 +817,20 @@ function App() {
                 {notice}
               </p>
             )}
-            <AlgorithmDetails algorithm={selectedAlgorithm} />
-            <AlgorithmForm
-              key={editingAlgorithm?.id ?? 'new'}
-              algorithm={editingAlgorithm}
-              onSubmit={handleSave}
-              onCancel={() => setEditingAlgorithm(null)}
-              saving={saving}
-            />
+            {addingAlgorithm || editingAlgorithm ? (
+              <AlgorithmForm
+                key={editingAlgorithm?.id ?? 'new'}
+                algorithm={editingAlgorithm}
+                onSubmit={handleSave}
+                onCancel={() => {
+                  setEditingAlgorithm(null)
+                  setAddingAlgorithm(false)
+                }}
+                saving={saving}
+              />
+            ) : (
+              <AlgorithmDetails algorithm={selectedAlgorithm} />
+            )}
           </section>
         </section>
         </>

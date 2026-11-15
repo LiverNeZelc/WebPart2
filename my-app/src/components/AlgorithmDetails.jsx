@@ -1,5 +1,7 @@
 import GraphCanvas from './GraphCanvas.jsx'
 import { graphSummary } from '../graphLabels.js'
+import TreeCanvas from './TreeCanvas.jsx'
+import { createTreeModel, getTreeKind } from '../treeAlgorithms.js'
 
 function AlgorithmDetails({ algorithm }) {
   return (
@@ -25,6 +27,19 @@ function AlgorithmDetails({ algorithm }) {
                 {algorithm.graph.directed ? 'Ориентированный' : 'Неориентированный'} граф · {graphSummary(algorithm.graph)}
               </p>
               <GraphCanvas graph={algorithm.graph} mode="view" onVertexClick={() => {}} />
+            </section>
+          )}
+          {algorithm.type === 'Деревья' && algorithm.tree && (
+            <section className="criteria-details tree-card-section" aria-label="Структура дерева">
+              <div className="tree-card-preview-heading">
+                <div>
+                  <h3>Структура дерева</h3>
+                  <p>{getTreeKind(algorithm.tree.kind).name}</p>
+                </div>
+                <span>{algorithm.tree.items.length} элементов</span>
+              </div>
+              <TreeCanvas model={createTreeModel(algorithm.tree.kind, algorithm.tree.items)} compact />
+              <p className="tree-card-values">{algorithm.tree.items.join(' · ')}</p>
             </section>
           )}
           {algorithm.criteria?.length > 0 && (

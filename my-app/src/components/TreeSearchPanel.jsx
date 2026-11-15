@@ -17,14 +17,15 @@ function TreeSearchPanel({ tree }) {
   const isRange = usesRange(tree.kind)
   const canMutate = ['AVL', 'RED_BLACK', 'HEAP'].includes(tree.kind)
   const model = useMemo(() => createTreeModel(tree.kind, items), [tree.kind, items])
-  const queryValue = query.trim() || (isRange ? `0-${Math.min(items.length - 1, 2)}` : items[0] || '')
+  const activeQuery = query.trim()
+  const queryValue = activeQuery || (isRange ? `0-${Math.min(items.length - 1, 2)}` : items[0] || '')
   const search = useMemo(
     () => createTreeTrace(tree.kind, items, queryValue),
     [tree.kind, items, queryValue],
   )
-  const steps = search.steps
-  const step = steps[Math.min(stepIndex, steps.length - 1)]
-  const stepIndexSafe = Math.min(stepIndex, steps.length - 1)
+  const steps = activeQuery ? search.steps : []
+  const stepIndexSafe = steps.length ? Math.min(stepIndex, steps.length - 1) : 0
+  const step = steps[stepIndexSafe]
 
   useEffect(() => {
     if (!playing) return undefined
@@ -116,6 +117,7 @@ function TreeSearchPanel({ tree }) {
   }, [steps.length])
 
   const visitCount = step?.visited?.length || 0
+  const foundText = activeQuery ? (steps.some((item) => item.found) ? 'Да' : 'Нет') : '—'
 
   return (
     <section className="tree-search-panel" aria-label="Поиск и визуализация дерева">
@@ -133,8 +135,15 @@ function TreeSearchPanel({ tree }) {
           <span>{isRange ? 'Диапазон индексов' : usesWords(tree.kind) ? 'Слово или префикс' : 'Ключ для поиска'}</span>
           <input
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => { if (event.key === 'Enter') { setStepIndex(0); setPlaying(false) } }}
+            inputMode={isRange || usesWords(tree.kind) ? 'text' : 'decimal'}
+            onChange={(event) => {
+              const nextQuery = event.target.value
+              if (!isRange && !usesWords(tree.kind) && !/^-?\d{0,9}$/.test(nextQuery)) return
+              setQuery(nextQuery)
+              setOperationError('')
+              setStepIndex(0)
+              setPlaying(false)
+            }}
             placeholder={isRange ? '0-3' : usesWords(tree.kind) ? 'алгоритм' : 'Например, 8'}
           />
         </label>
@@ -149,13 +158,9 @@ function TreeSearchPanel({ tree }) {
             </select>
           </label>
         )}
-        {canMutate && operation !== 'search' ? (
+        {canMutate && operation !== 'search' && (
           <button type="button" className="primary-button tree-run-button" onClick={runOperation}>
             {operation === 'pop' ? 'Извлечь минимум' : operation === 'insert' ? 'Вставить и перестроить' : 'Удалить и перестроить'}
-          </button>
-        ) : (
-          <button type="button" className="primary-button tree-run-button" onClick={() => { setStepIndex(0); setPlaying(false) }}>
-            Начать поиск
           </button>
         )}
         <label className="speed-control">
@@ -180,9 +185,9 @@ function TreeSearchPanel({ tree }) {
           <p className="eyebrow">Шаг {steps.length ? stepIndexSafe + 1 : 0} / {steps.length}</p>
           <h3>{isRange ? 'Сумма диапазона' : tree.kind === 'TRIE' ? 'Префикс' : tree.kind === 'HEAP' ? 'Позиция в куче' : 'Сравнение'}</h3>
           <strong className="tree-comparison">{step?.comparison || step?.prefix || (step?.result !== undefined ? step.result : step?.current ? model.nodes.find((node) => node.id === step.current)?.label : '—')}</strong>
-          <p className="tree-step-log" role="status">{step?.log || 'Введите значение и запустите визуализацию.'}</p>
-          <div className="traversal-stats"><span>Проверено узлов</span><strong>{visitCount}</strong></div>
-          <div className="traversal-stats"><span>Найдено</span><strong>{steps.some((item) => item.found) ? 'Да' : 'Нет'}</strong></div>
+          <p className="tree-step-log" role="status">{step?.log || 'Введите значение, чтобы увидеть шаги поиска.'}</p>
+          <div className="traversal-stats"><span>Проверено узлов</span><strong>{activeQuery ? visitCount : '—'}</strong></div>
+          <div className="traversal-stats"><span>Найдено</span><strong>{foundText}</strong></div>
           {tree.kind === 'HEAP' && (
             <p className="field-hint">Куча упорядочена частично: для поиска проверяются элементы, а извлечение минимума просеивает корень вниз.</p>
           )}

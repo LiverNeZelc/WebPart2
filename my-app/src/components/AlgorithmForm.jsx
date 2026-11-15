@@ -151,9 +151,9 @@ function AlgorithmForm({ algorithm, onSubmit, onCancel, saving }) {
           <p className="eyebrow">Управление каталогом</p>
           <h2>{algorithm ? 'Редактировать алгоритм' : 'Добавить алгоритм'}</h2>
         </div>
-        {algorithm && (
+        {onCancel && (
           <button type="button" className="text-button" onClick={onCancel} disabled={saving || validatingCode}>
-            Отменить
+            {algorithm ? 'Отменить' : 'Закрыть'}
           </button>
         )}
       </div>

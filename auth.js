@@ -3,27 +3,87 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { createHash, createHmac, randomUUID } = require('node:crypto');
 
 module.exports = (User) => {
     const router = express.Router();
-    const jwtSecret = process.env.JWT_SECRET || 'development-secret';
-    const accessTokenExpiresIn = process.env.ACCESS_TOKEN_EXPIRES_IN || '15m';
-    const refreshTokenExpiresIn = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
+    const jwtSecret = process.env.JWT_SECRET;
+    if (typeof jwtSecret !== 'string' || Buffer.byteLength(jwtSecret, 'utf8') < 32) {
+        throw new Error('JWT_SECRET must be configured with at least 32 bytes of cryptographically random data.');
+    }
+    const issuer = 'webpart2';
+    const audience = 'webpart2-client';
+    const cookieName = 'refreshToken';
+    const refreshCookiePath = process.env.REFRESH_COOKIE_PATH || '/api/auth';
+    if (!/^\/[A-Za-z0-9/_-]*$/.test(refreshCookiePath)) {
+        throw new Error('REFRESH_COOKIE_PATH must be a valid absolute URL path.');
+    }
+    const accessTokenSecret = createHmac('sha256', jwtSecret).update('webpart2:access:v1').digest();
+    const refreshTokenSecret = createHmac('sha256', jwtSecret).update('webpart2:refresh:v1').digest();
+    const tokenOptions = {
+        algorithm: 'HS256',
+        issuer,
+        audience
+    };
+    const verifyOptions = {
+        algorithms: ['HS256'],
+        issuer,
+        audience
+    };
+    const secureCookie = process.env.NODE_ENV === 'production' ? '; Secure' : '';
 
-    const verifyAccessToken = (token) => {
-        const payload = jwt.verify(token, jwtSecret);
-        if (!Number.isInteger(payload.userId) || payload.userId < 1 || payload.type === 'refresh') {
-            throw new Error('Недействительный access-токен');
+    router.use((req, res, next) => {
+        res.set('Cache-Control', 'no-store');
+        next();
+    });
+
+    const hashToken = (token) => createHash('sha256').update(token).digest('hex');
+    const getRefreshToken = (req) => {
+        const cookie = (req.get('Cookie') || '').split(';')
+            .map((part) => part.trim())
+            .find((part) => part.startsWith(`${cookieName}=`));
+        if (!cookie) return null;
+        try {
+            return decodeURIComponent(cookie.slice(cookieName.length + 1));
+        } catch {
+            return null;
         }
-        return payload;
+    };
+    const setRefreshCookie = (res, token) => {
+        const payload = jwt.decode(token);
+        const maxAge = Math.max(0, payload.exp - Math.floor(Date.now() / 1000));
+        res.append('Set-Cookie', `${cookieName}=${encodeURIComponent(token)}; Path=${refreshCookiePath}; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secureCookie}`);
+    };
+    const clearRefreshCookie = (res) => {
+        res.append('Set-Cookie', `${cookieName}=; Path=${refreshCookiePath}; HttpOnly; SameSite=Strict; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT${secureCookie}`);
     };
 
-    const createTokens = (userId) => ({
-        accessToken: jwt.sign({ userId }, jwtSecret, { expiresIn: accessTokenExpiresIn }),
-        refreshToken: jwt.sign({ userId, type: 'refresh' }, jwtSecret, {
-            expiresIn: refreshTokenExpiresIn
-        })
-    });
+    const verifyAccessToken = (token) => {
+        const payload = jwt.verify(token, accessTokenSecret, verifyOptions);
+        const userId = Number(payload.sub);
+        if (payload.type !== 'access' || !Number.isSafeInteger(userId) || userId < 1 || !payload.jti) {
+            throw new Error('Недействительный access-токен');
+        }
+        return { userId };
+    };
+
+    const createTokens = (userId) => {
+        const subject = String(userId);
+        return {
+            accessToken: jwt.sign({ type: 'access' }, accessTokenSecret, {
+                ...tokenOptions,
+                subject,
+                jwtid: randomUUID(),
+                expiresIn: '15m'
+            }),
+            refreshToken: jwt.sign({ type: 'refresh' }, refreshTokenSecret, {
+                ...tokenOptions,
+                subject,
+                jwtid: randomUUID(),
+                expiresIn: '7d'
+            })
+        };
+    };
 
     const publicUser = (user) => ({ id: user.id, username: user.username });
 
@@ -66,9 +126,9 @@ module.exports = (User) => {
             password: await bcrypt.hash(password, 10)
         });
         const tokens = createTokens(user.id);
-        await user.update({ refreshToken: tokens.refreshToken });
-
-        return res.status(201).json({ user: publicUser(user), ...tokens });
+        await user.update({ refreshToken: hashToken(tokens.refreshToken) });
+        setRefreshCookie(res, tokens.refreshToken);
+        return res.status(201).json({ user: publicUser(user), accessToken: tokens.accessToken });
     });
 
     router.post('/login', async (req, res) => {
@@ -88,38 +148,73 @@ module.exports = (User) => {
         }
 
         const tokens = createTokens(user.id);
-        await user.update({ refreshToken: tokens.refreshToken });
-        return res.json({ user: publicUser(user), ...tokens });
+        await user.update({ refreshToken: hashToken(tokens.refreshToken) });
+        setRefreshCookie(res, tokens.refreshToken);
+        return res.json({ user: publicUser(user), accessToken: tokens.accessToken });
     });
 
     router.post('/refresh', async (req, res) => {
-        const { refreshToken } = req.body || {};
+        const refreshToken = getRefreshToken(req);
 
-        if (typeof refreshToken !== 'string') {
-            return res.status(400).json({ error: 'Поле refreshToken обязательно' });
+        if (!refreshToken) {
+            return res.status(401).json({ error: 'Требуется refresh-cookie' });
         }
 
         let payload;
 
         try {
-            payload = jwt.verify(refreshToken, jwtSecret);
+            payload = jwt.verify(refreshToken, refreshTokenSecret, verifyOptions);
         } catch (error) {
+            clearRefreshCookie(res);
             return res.status(401).json({ error: 'Недействительный или истёкший refresh-токен' });
         }
 
-        if (payload.type !== 'refresh') {
+        const userId = Number(payload.sub);
+        if (payload.type !== 'refresh' || !Number.isSafeInteger(userId) || userId < 1 || !payload.jti) {
+            clearRefreshCookie(res);
             return res.status(401).json({ error: 'Недействительный refresh-токен' });
         }
 
-        const user = await User.findOne({ where: { id: payload.userId, refreshToken } });
+        const oldTokenHash = hashToken(refreshToken);
+        const user = await User.findOne({ where: { id: userId, refreshToken: oldTokenHash } });
 
         if (!user) {
+            clearRefreshCookie(res);
             return res.status(401).json({ error: 'Недействительный refresh-токен' });
         }
 
         const tokens = createTokens(user.id);
-        await user.update({ refreshToken: tokens.refreshToken });
-        return res.json(tokens);
+        const [updatedCount] = await User.update(
+            { refreshToken: hashToken(tokens.refreshToken) },
+            { where: { id: user.id, refreshToken: oldTokenHash } }
+        );
+        if (updatedCount !== 1) {
+            clearRefreshCookie(res);
+            return res.status(401).json({ error: 'Refresh-токен уже использован' });
+        }
+        setRefreshCookie(res, tokens.refreshToken);
+        return res.json({ accessToken: tokens.accessToken });
+    });
+
+    router.post('/logout', async (req, res) => {
+        const refreshToken = getRefreshToken(req);
+        clearRefreshCookie(res);
+        if (refreshToken) {
+            let payload;
+            try {
+                payload = jwt.verify(refreshToken, refreshTokenSecret, verifyOptions);
+            } catch {
+                return res.status(204).send();
+            }
+            const userId = Number(payload.sub);
+            if (payload.type === 'refresh' && Number.isSafeInteger(userId) && userId > 0 && payload.jti) {
+                await User.update(
+                    { refreshToken: null },
+                    { where: { id: userId, refreshToken: hashToken(refreshToken) } }
+                );
+            }
+        }
+        return res.status(204).send();
     });
 
     router.get('/me', authenticate, async (req, res) => {

@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useId, useRef } from 'react'
 
 function getSvgPoint(svg, event) {
   const point = svg.createSVGPoint()
@@ -25,6 +25,7 @@ function GraphCanvas({
   const svgRef = useRef(null)
   const draggedVertex = useRef(null)
   const suppressClick = useRef(false)
+  const arrowId = `graph-arrow-${useId().replaceAll(':', '')}`
 
   const handlePointerMove = (event) => {
     if (!draggedVertex.current || !svgRef.current) return
@@ -64,8 +65,17 @@ function GraphCanvas({
       }}
     >
       <defs>
-        <marker id="graph-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" className="graph-arrowhead" />
+        <marker
+          id={arrowId}
+          markerWidth="12"
+          markerHeight="12"
+          refX="10"
+          refY="6"
+          viewBox="0 0 12 12"
+          markerUnits="userSpaceOnUse"
+          orient="auto"
+        >
+          <path d="M 1 1 L 10 6 L 1 11 Z" className="graph-arrowhead" />
         </marker>
       </defs>
       {graph.edges.map((edge, index) => {
@@ -73,15 +83,23 @@ function GraphCanvas({
         const target = graph.vertices.find((vertex) => vertex.id === edge.target)
         if (!source || !target) return null
         const active = activeEdge === index
+        const dx = target.x - source.x
+        const dy = target.y - source.y
+        const distance = Math.hypot(dx, dy)
+        if (distance < 1) return null
+        const ux = dx / distance
+        const uy = dy / distance
+        const sourceOffset = graph.directed ? 25 : 0
+        const targetOffset = graph.directed ? 29 : 0
         return (
           <g key={`${edge.source}-${edge.target}-${index}`}>
             <line
               className={`graph-edge ${active ? 'graph-edge-active' : ''} ${selectedEdge === index ? 'graph-edge-selected' : ''}`}
-              x1={source.x}
-              y1={source.y}
-              x2={target.x}
-              y2={target.y}
-              markerEnd={graph.directed ? 'url(#graph-arrow)' : undefined}
+              x1={source.x + ux * sourceOffset}
+              y1={source.y + uy * sourceOffset}
+              x2={target.x - ux * targetOffset}
+              y2={target.y - uy * targetOffset}
+              markerEnd={graph.directed ? `url(#${arrowId})` : undefined}
               onClick={(event) => {
                 if (mode !== 'edit') return
                 event.stopPropagation()

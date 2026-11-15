@@ -2,7 +2,9 @@ import axios from 'axios'
 
 const apiUrl = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 const sessionKey = 'algorithm-library-session'
-const apiClient = axios.create({ baseURL: apiUrl })
+const apiClient = axios.create({ baseURL: apiUrl, withCredentials: true })
+let currentAccessToken = null
+let refreshPromise = null
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -24,24 +26,68 @@ export function getSession() {
     throw new Error('Сохранённый сеанс повреждён. Войдите снова.')
   }
 
-  if (!session?.accessToken || !session?.refreshToken || !session?.user?.id) {
+  if (!session?.user?.id || !session?.user?.username) {
     clearSession()
     throw new Error('Сохранённый сеанс недействителен. Войдите снова.')
   }
 
-  return session
+  if (session.accessToken || session.refreshToken) {
+    localStorage.setItem(sessionKey, JSON.stringify({ user: session.user }))
+  }
+
+  return { user: session.user }
 }
 
 export function clearSession() {
+  currentAccessToken = null
   localStorage.removeItem(sessionKey)
 }
 
+export function getAccessToken() {
+  return currentAccessToken
+}
+
 function saveSession(session) {
-  localStorage.setItem(sessionKey, JSON.stringify(session))
+  currentAccessToken = session.accessToken
+  localStorage.setItem(sessionKey, JSON.stringify({ user: session.user }))
+}
+
+async function refreshAccessToken() {
+  if (!refreshPromise) {
+    refreshPromise = request('/auth/refresh', { method: 'POST' }, false, false)
+      .then(({ accessToken }) => {
+        currentAccessToken = accessToken
+        return accessToken
+      })
+      .finally(() => { refreshPromise = null })
+  }
+  return refreshPromise
+}
+
+export async function restoreSession() {
+  const session = getSession()
+  if (!session) return null
+  try {
+    await refreshAccessToken()
+    return session
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      clearSession()
+      return null
+    }
+    throw error
+  }
+}
+
+export async function logout() {
+  try {
+    await request('/auth/logout', { method: 'POST' }, false, false)
+  } finally {
+    clearSession()
+  }
 }
 
 async function request(path, options = {}, authenticated = true, canRefresh = true) {
-  const session = authenticated ? getSession() : null
   const headers = { ...options.headers }
   let body = options.body
 
@@ -49,7 +95,7 @@ async function request(path, options = {}, authenticated = true, canRefresh = tr
     headers['Content-Type'] = 'application/json'
     body = JSON.stringify(body)
   }
-  if (session?.accessToken) headers.Authorization = `Bearer ${session.accessToken}`
+  if (authenticated && currentAccessToken) headers.Authorization = `Bearer ${currentAccessToken}`
 
   let response
   try {
@@ -63,15 +109,9 @@ async function request(path, options = {}, authenticated = true, canRefresh = tr
     if (!axios.isAxiosError(error)) throw error
 
     const status = error.response?.status ?? 0
-    if (status === 401 && authenticated && canRefresh && session?.refreshToken) {
+    if (status === 401 && authenticated && canRefresh) {
       try {
-        const tokens = await request(
-          '/auth/refresh',
-          { method: 'POST', body: { refreshToken: session.refreshToken } },
-          false,
-          false,
-        )
-        saveSession({ ...session, ...tokens })
+        await refreshAccessToken()
         return request(path, options, true, false)
       } catch (refreshError) {
         if (refreshError instanceof ApiError && refreshError.status === 401) {
@@ -105,7 +145,7 @@ export async function authenticate(credentials, mode) {
     body: credentials,
   }, false)
   saveSession(session)
-  return session
+  return { user: session.user }
 }
 
 export async function listAlgorithms(search) {
