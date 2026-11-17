@@ -483,7 +483,9 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #a3544
 .app-shell[data-theme="dark"] .graph-selected-summary,
 .app-shell[data-theme="dark"] .tree-sidebar,
 .app-shell[data-theme="dark"] .tree-search-panel,
-.app-shell[data-theme="dark"] .tree-empty-summary {
+.app-shell[data-theme="dark"] .tree-empty-summary,
+.app-shell[data-theme="dark"] .tree-preview,
+.app-shell[data-theme="dark"] .tree-card-section {
   border-color: var(--theme-border);
   background: var(--theme-surface);
   box-shadow: 0 16px 40px rgba(0, 0, 0, .18);
