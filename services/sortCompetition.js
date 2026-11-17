@@ -2,17 +2,60 @@
 
 const crypto = require('node:crypto');
 const { WebSocket, WebSocketServer } = require('ws');
+const { recordUserAction } = require('./userActionLog');
 
 const objectIdPattern = /^[a-f\d]{24}$/i;
 const maxProgressValues = 64;
 const maxChatMessageLength = 500;
 
-module.exports = (server, Algorithm, User, verifyAccessToken) => {
+module.exports = (server, Algorithm, User, verifyAccessToken, options = {}) => {
+    const { SortingCompetition, UserActionLog } = options;
     const websocketServer = new WebSocketServer({ noServer: true, maxPayload: 16384 });
     const clients = new WeakMap();
     const rooms = new Map();
     const challenges = new Map();
     const clientsByUser = new Map();
+
+    const logSortingAction = (userId, action, resourceId, metadata) => {
+        void recordUserAction(UserActionLog, {
+            user_id: userId,
+            action,
+            resource_type: 'sorting_competition',
+            resource_id: resourceId,
+            outcome: 'success',
+            status_code: 200,
+            metadata
+        });
+    };
+
+    const updateCompetitionHistory = (room, values) => {
+        if (!room.historyRecord) return Promise.resolve();
+        return Promise.resolve().then(() => room.historyRecord.update(values)).catch((error) => {
+            console.error('Failed to update sorting competition history:', error);
+        });
+    };
+
+    const closeCompetition = (room, status, userId = null) => {
+        if (['completed', 'failed', 'abandoned'].includes(room.status)) return;
+        room.status = status;
+        const completedAt = new Date();
+        void updateCompetitionHistory(room, {
+            status,
+            completed_at: completedAt,
+            challenger_elapsed_ms: room.completions.get(room.participants[0].userId) ?? null,
+            opponent_elapsed_ms: room.completions.get(room.participants[1].userId) ?? null,
+            challenger_steps: room.progressCounts.get(room.participants[0].userId) || 0,
+            opponent_steps: room.progressCounts.get(room.participants[1].userId) || 0
+        });
+        for (const participant of room.participants) {
+            logSortingAction(
+                participant.userId,
+                status === 'abandoned' ? 'sorting.competition_abandoned' : 'sorting.competition_failed',
+                room.id,
+                { actor_user_id: userId }
+            );
+        }
+    };
 
     const send = (client, message) => {
         if (client.readyState === WebSocket.OPEN) {
@@ -52,6 +95,10 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
 
         const other = room.members.find((member) => member !== client);
         if (other) send(other, { type: 'opponent-disconnected' });
+        logSortingAction(state.user.userId, 'sorting.competition_left', room.id, {
+            status: room.status
+        });
+        closeCompetition(room, 'abandoned', state.user.userId);
         rooms.delete(room.id);
         for (const member of room.members) {
             const memberState = clients.get(member);
@@ -61,22 +108,24 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
 
     const sendError = (client, message) => send(client, { type: 'error', message });
 
-    const createRoom = (firstClient, secondClient, firstAlgorithm, secondAlgorithm) => {
+    const createRoom = async (firstClient, secondClient, firstAlgorithm, secondAlgorithm) => {
         const room = {
             id: crypto.randomUUID(),
             members: [firstClient, secondClient],
             ready: new Set(),
             started: false,
-            values: Array.from({ length: 32 }, () => crypto.randomInt(10, 100))
+            values: Array.from({ length: 32 }, () => crypto.randomInt(10, 100)),
+            completions: new Map(),
+            progressCounts: new Map(),
+            status: 'matched',
+            participants: []
         };
-        rooms.set(room.id, room);
 
         const participants = [
             { client: firstClient, algorithm: firstAlgorithm },
             { client: secondClient, algorithm: secondAlgorithm }
         ].map(({ client, algorithm }) => {
             const state = clients.get(client);
-            state.roomId = room.id;
             return {
                 userId: state.user.userId,
                 username: state.user.username,
@@ -84,6 +133,27 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
                 algorithmName: algorithm.name
             };
         });
+        room.participants = participants;
+        if (SortingCompetition) {
+            room.historyRecord = await SortingCompetition.create({
+                id: room.id,
+                challenger_user_id: participants[0].userId,
+                challenger_username: participants[0].username,
+                challenger_algorithm_id: participants[0].algorithmId,
+                challenger_algorithm_name: participants[0].algorithmName,
+                opponent_user_id: participants[1].userId,
+                opponent_username: participants[1].username,
+                opponent_algorithm_id: participants[1].algorithmId,
+                opponent_algorithm_name: participants[1].algorithmName,
+                input_values: room.values,
+                input_size: room.values.length,
+                status: 'matched'
+            });
+        }
+        for (const member of room.members) {
+            clients.get(member).roomId = room.id;
+        }
+        rooms.set(room.id, room);
 
         for (const client of room.members) {
             send(client, {
@@ -93,6 +163,12 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
                 values: room.values
             });
         }
+        for (const participant of participants) {
+            logSortingAction(participant.userId, 'sorting.competition_matched', room.id, {
+                algorithm_id: participant.algorithmId
+            });
+        }
+        return room;
     };
 
     const joinQueue = async (client, message) => {
@@ -160,6 +236,14 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
                 accepting: false,
                 timeout: null
             };
+            logSortingAction(state.user.userId, 'sorting.challenge_sent', challengeId, {
+                algorithm_id: algorithmId,
+                opponent_user_id: reference.owner_id
+            });
+            logSortingAction(reference.owner_id, 'sorting.challenge_received', challengeId, {
+                algorithm_id: referenceId,
+                challenger_user_id: state.user.userId
+            });
             challenge.timeout = setTimeout(() => {
                 const expired = removeChallenge(challengeId);
                 if (!expired) return;
@@ -223,6 +307,7 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
                 return sendError(client, 'Алгоритм больше недоступен. Приглашение отменено.');
             }
 
+            await createRoom(challenge.client, client, challengerAlgorithm, targetAlgorithm);
             removeChallenge(challengeId);
             for (const otherChallenge of [...challenges.values()]) {
                 if (otherChallenge.targetUserId === state.user.userId) {
@@ -233,7 +318,12 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
                     });
                 }
             }
-            createRoom(challenge.client, client, challengerAlgorithm, targetAlgorithm);
+            logSortingAction(state.user.userId, 'sorting.challenge_accepted', challengeId, {
+                opponent_user_id: challenge.challengerUserId
+            });
+            logSortingAction(challenge.challengerUserId, 'sorting.challenge_acceptance_received', challengeId, {
+                opponent_user_id: state.user.userId
+            });
         } finally {
             state.joining = false;
         }
@@ -299,6 +389,12 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
                 return sendError(client, 'Это приглашение уже недоступно');
             }
             removeChallenge(message.challengeId);
+            logSortingAction(state.user.userId, 'sorting.challenge_declined', challenge.id, {
+                opponent_user_id: challenge.challengerUserId
+            });
+            logSortingAction(challenge.challengerUserId, 'sorting.challenge_decline_received', challenge.id, {
+                opponent_user_id: state.user.userId
+            });
             send(challenge.client, {
                 type: 'challenge-declined',
                 challengeId: challenge.id,
@@ -313,6 +409,12 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
             if (!challenge || challenge.client !== client || challenge.accepting) {
                 return sendError(client, 'Приглашение уже недоступно');
             }
+            logSortingAction(state.user.userId, 'sorting.challenge_cancelled', challenge.id, {
+                opponent_user_id: challenge.targetUserId
+            });
+            logSortingAction(challenge.targetUserId, 'sorting.challenge_cancellation_received', challenge.id, {
+                opponent_user_id: state.user.userId
+            });
             cancelChallenge(message.challengeId, 'challenge-cancelled');
             return;
         }
@@ -329,12 +431,20 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
 
         if (message.type === 'ready') {
             if (room.started) return;
+            if (room.ready.has(client)) return;
             room.ready.add(client);
+            logSortingAction(state.user.userId, 'sorting.competition_ready', room.id);
             for (const member of room.members) {
                 send(member, { type: 'ready-count', count: room.ready.size, total: room.members.length });
             }
             if (room.ready.size === room.members.length) {
                 room.started = true;
+                room.status = 'in_progress';
+                const startedAt = new Date();
+                void updateCompetitionHistory(room, { status: room.status, started_at: startedAt });
+                for (const participant of room.participants) {
+                    logSortingAction(participant.userId, 'sorting.competition_started', room.id);
+                }
                 for (const member of room.members) {
                     send(member, { type: 'start', roomId: room.id, values: room.values });
                 }
@@ -354,6 +464,7 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
                 text: message.text.trim(),
                 sentAt: new Date().toISOString()
             };
+            logSortingAction(state.user.userId, 'sorting.chat_message_sent', room.id);
             for (const member of room.members) send(member, chatMessage);
             return;
         }
@@ -371,6 +482,7 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
                     send(member, { type: 'progress', senderId, values: message.values });
                 }
             }
+            room.progressCounts.set(senderId, (room.progressCounts.get(senderId) || 0) + 1);
             return;
         }
 
@@ -380,14 +492,60 @@ module.exports = (server, Algorithm, User, verifyAccessToken) => {
                 return sendError(client, 'Некорректный результат сортировки');
             }
             const senderId = state.user.userId;
+            if (room.completions.has(senderId)) {
+                return sendError(client, 'Результат сортировки уже зарегистрирован');
+            }
+            room.completions.set(senderId, message.elapsed);
+            const participantIndex = room.participants.findIndex((participant) => participant.userId === senderId);
+            const elapsedField = participantIndex === 0 ? 'challenger_elapsed_ms' : 'opponent_elapsed_ms';
+            const stepsField = participantIndex === 0 ? 'challenger_steps' : 'opponent_steps';
+            void updateCompetitionHistory(room, {
+                [elapsedField]: message.elapsed,
+                [stepsField]: room.progressCounts.get(senderId) || 0
+            });
+            logSortingAction(senderId, 'sorting.algorithm_completed', room.id, {
+                elapsed_ms: message.elapsed
+            });
+            let winnerUserId = null;
+            if (room.completions.size === room.participants.length) {
+                const firstElapsed = room.completions.get(room.participants[0].userId);
+                const secondElapsed = room.completions.get(room.participants[1].userId);
+                winnerUserId = firstElapsed === secondElapsed
+                    ? null
+                    : firstElapsed < secondElapsed
+                        ? room.participants[0].userId
+                        : room.participants[1].userId;
+                room.status = 'completed';
+                const completedAt = new Date();
+                void updateCompetitionHistory(room, {
+                    challenger_elapsed_ms: firstElapsed,
+                    opponent_elapsed_ms: secondElapsed,
+                    challenger_steps: room.progressCounts.get(room.participants[0].userId) || 0,
+                    opponent_steps: room.progressCounts.get(room.participants[1].userId) || 0,
+                    winner_user_id: winnerUserId,
+                    status: room.status,
+                    completed_at: completedAt
+                });
+                for (const participant of room.participants) {
+                    logSortingAction(participant.userId, 'sorting.competition_completed', room.id, {
+                        winner_user_id: winnerUserId
+                    });
+                }
+            }
             for (const member of room.members) {
-                send(member, { type: 'complete', senderId, elapsed: message.elapsed });
+                send(member, {
+                    type: 'complete',
+                    senderId,
+                    elapsed: message.elapsed,
+                    ...(room.status === 'completed' ? { winnerUserId } : {})
+                });
             }
             return;
         }
 
         if (message.type === 'failed') {
             const senderId = state.user.userId;
+            closeCompetition(room, 'failed', senderId);
             for (const member of room.members) {
                 send(member, { type: 'failed', senderId });
             }

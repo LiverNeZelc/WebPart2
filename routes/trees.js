@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { createUserActionLogger } = require('../services/userActionLog');
 
 const treeIdPattern = /^[a-f\d]{24}$/i;
 const kinds = new Set(['BST', 'AVL', 'RED_BLACK', 'B_TREE', 'B_PLUS_TREE', 'TRIE', 'SEGMENT', 'FENWICK', 'HEAP']);
@@ -59,9 +60,10 @@ const toPublicTree = (tree) => ({
     updatedAt: tree.updatedAt
 });
 
-module.exports = (Tree, authenticate) => {
+module.exports = (Tree, authenticate, UserActionLog) => {
     const router = express.Router();
     router.use(authenticate);
+    if (UserActionLog) router.use(createUserActionLogger(UserActionLog, 'tree'));
 
     router.get('/', async (req, res) => {
         const trees = await Tree.find({ owner_id: req.user.userId }).sort({ _id: 1 }).lean();

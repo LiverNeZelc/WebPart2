@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { createUserActionLogger } = require('../services/userActionLog');
 
 const maxCriteria = 50;
 const maxSearchLength = 100;
@@ -103,7 +104,7 @@ const algorithmData = (data) => ({
     }))
 });
 
-module.exports = (Algorithm, authenticate) => {
+module.exports = (Algorithm, authenticate, UserActionLog) => {
     const router = express.Router();
 
     const listAlgorithms = async (req, res) => {
@@ -142,6 +143,7 @@ module.exports = (Algorithm, authenticate) => {
     });
 
     router.use(authenticate);
+    if (UserActionLog) router.use(createUserActionLogger(UserActionLog, 'algorithm'));
     router.get('/', listAlgorithms);
     router.get('/:ownerId', async (req, res) => {
         const ownerId = Number(req.params.ownerId);

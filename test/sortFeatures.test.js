@@ -144,7 +144,32 @@ test('WebSocket notifies the algorithm owner and starts the competition when acc
     ]);
     const User = { findByPk: async (id) => users.get(id) || null };
     const verifyToken = (token) => ({ userId: Number(token.split('-')[1]) });
-    const websocketServer = createSortCompetition(server, makeAlgorithmModel(), User, verifyToken);
+    const competitionRecords = [];
+    const SortingCompetition = {
+        create: async (values) => {
+            const record = {
+                ...values,
+                updates: [],
+                update: async function update(nextValues) {
+                    Object.assign(this, nextValues);
+                    this.updates.push(nextValues);
+                }
+            };
+            competitionRecords.push(record);
+            return record;
+        }
+    };
+    const actionRecords = [];
+    const UserActionLog = {
+        create: async (record) => { actionRecords.push(record); }
+    };
+    const websocketServer = createSortCompetition(
+        server,
+        makeAlgorithmModel(),
+        User,
+        verifyToken,
+        { SortingCompetition, UserActionLog }
+    );
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const clients = [];
     t.after(async () => {
@@ -190,6 +215,14 @@ test('WebSocket notifies the algorithm owner and starts the competition when acc
     assert.equal(firstMatch.participants.find((participant) => participant.userId === 1).algorithmId, firstAlgorithmId);
     assert.equal(firstMatch.participants.find((participant) => participant.userId === 2).algorithmId, secondAlgorithmId);
     assert.equal(JSON.stringify(firstMatch).includes(source), false);
+    assert.equal(competitionRecords.length, 1);
+    assert.equal(competitionRecords[0].challenger_user_id, 1);
+    assert.equal(competitionRecords[0].opponent_user_id, 2);
+    assert.equal(competitionRecords[0].challenger_algorithm_id, firstAlgorithmId);
+    assert.equal(competitionRecords[0].opponent_algorithm_id, secondAlgorithmId);
+    assert.deepEqual(competitionRecords[0].input_values, firstMatch.values);
+    assert.equal(competitionRecords[0].input_size, 32);
+    assert.equal(competitionRecords[0].status, 'matched');
 
     first.send(JSON.stringify({ type: 'chat', text: '  Привет!  ' }));
     const [firstChat, secondChat] = await Promise.all([
@@ -218,10 +251,27 @@ test('WebSocket notifies the algorithm owner and starts the competition when acc
         nextMessage(second, 'start')
     ]);
     assert.deepEqual(firstStart.values, secondStart.values);
+    assert.equal(competitionRecords[0].status, 'in_progress');
+    assert.ok(competitionRecords[0].started_at instanceof Date);
 
     const progress = Array.from({ length: 32 }, (_, index) => 10 + index);
     first.send(JSON.stringify({ type: 'progress', values: progress }));
     assert.deepEqual((await nextMessage(second, 'progress')).values, progress);
     first.send(JSON.stringify({ type: 'complete', elapsed: 12.5 }));
     assert.equal((await nextMessage(second, 'complete')).elapsed, 12.5);
+    assert.equal((await nextMessage(first, 'complete')).elapsed, 12.5);
+    second.send(JSON.stringify({ type: 'complete', elapsed: 15.2 }));
+    const [firstResult, secondResult] = await Promise.all([
+        nextMessage(first, 'complete'),
+        nextMessage(second, 'complete')
+    ]);
+    assert.equal(firstResult.winnerUserId, 1);
+    assert.equal(secondResult.winnerUserId, 1);
+    assert.equal(competitionRecords[0].challenger_elapsed_ms, 12.5);
+    assert.equal(competitionRecords[0].opponent_elapsed_ms, 15.2);
+    assert.equal(competitionRecords[0].winner_user_id, 1);
+    assert.equal(competitionRecords[0].status, 'completed');
+    assert.ok(competitionRecords[0].completed_at instanceof Date);
+    assert.ok(actionRecords.some((record) => record.action === 'sorting.competition_matched'));
+    assert.ok(actionRecords.some((record) => record.action === 'sorting.competition_completed'));
 });

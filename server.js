@@ -7,6 +7,8 @@ const express = require('express');
 const mongoose = require('mongoose');
 const { Sequelize, DataTypes } = require('sequelize');
 const userModel = require('./models/user');
+const sortingCompetitionModel = require('./models/sortingCompetition');
+const userActionLogModel = require('./models/userActionLog');
 const Algorithm = require('./models/algorithm');
 const Graph = require('./models/graph');
 const Tree = require('./models/tree');
@@ -22,7 +24,9 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
     dialect: process.env.DB_DIALECT || 'postgres'
 });
 const User = userModel(sequelize, DataTypes);
-const { router: authRouter, authenticate, verifyAccessToken } = createAuth(User);
+const SortingCompetition = sortingCompetitionModel(sequelize, DataTypes);
+const UserActionLog = userActionLogModel(sequelize, DataTypes);
+const { router: authRouter, authenticate, verifyAccessToken } = createAuth(User, UserActionLog);
 const server = http.createServer(app);
 
 app.use(express.json({ limit: '256kb' }));
@@ -42,10 +46,10 @@ app.get('/health', async (req, res) => {
 });
 
 app.use('/auth', authRouter);
-app.use('/algorithms', createAlgorithmRoutes(Algorithm, authenticate));
-app.use('/graphs', createGraphRoutes(Graph, authenticate));
-app.use('/trees', createTreeRoutes(Tree, authenticate));
-createSortCompetition(server, Algorithm, User, verifyAccessToken);
+app.use('/algorithms', createAlgorithmRoutes(Algorithm, authenticate, UserActionLog));
+app.use('/graphs', createGraphRoutes(Graph, authenticate, UserActionLog));
+app.use('/trees', createTreeRoutes(Tree, authenticate, UserActionLog));
+createSortCompetition(server, Algorithm, User, verifyAccessToken, { SortingCompetition, UserActionLog });
 
 app.use((req, res) => {
     res.status(404).json({ error: 'Маршрут не найден' });

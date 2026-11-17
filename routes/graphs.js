@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { createUserActionLogger } = require('../services/userActionLog');
 
 const graphIdPattern = /^[a-f\d]{24}$/i;
 const vertexIdPattern = /^[a-zA-Z0-9_-]{1,40}$/;
@@ -88,9 +89,10 @@ const toPublicGraph = (graph) => ({
     updatedAt: graph.updatedAt
 });
 
-module.exports = (Graph, authenticate) => {
+module.exports = (Graph, authenticate, UserActionLog) => {
     const router = express.Router();
     router.use(authenticate);
+    if (UserActionLog) router.use(createUserActionLogger(UserActionLog, 'graph'));
 
     router.get('/', async (req, res) => {
         const graphs = await Graph.find({ owner_id: req.user.userId }).sort({ _id: 1 }).lean();

@@ -66,7 +66,11 @@ test('JWT sessions use typed HS256 tokens, HttpOnly rotating refresh cookies and
     });
 
     const users = createUserModel();
-    const { router, verifyAccessToken } = createAuth(users);
+    const actionRecords = [];
+    const UserActionLog = {
+        create: async (record) => { actionRecords.push(record); }
+    };
+    const { router, verifyAccessToken } = createAuth(users, UserActionLog);
     const app = express();
     app.use(express.json());
     app.use('/auth', router);
@@ -80,6 +84,7 @@ test('JWT sessions use typed HS256 tokens, HttpOnly rotating refresh cookies and
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: 'test-user', password: 'strong-password' })
     });
+    await new Promise((resolve) => setImmediate(resolve));
     assert.equal(registerResponse.status, 201);
     const registerBody = await registerResponse.json();
     assert.equal('refreshToken' in registerBody, false);
@@ -104,6 +109,7 @@ test('JWT sessions use typed HS256 tokens, HttpOnly rotating refresh cookies and
         method: 'POST',
         headers: { Cookie: firstRefreshCookie }
     });
+    await new Promise((resolve) => setImmediate(resolve));
     assert.equal(refreshResponse.status, 200);
     const refreshBody = await refreshResponse.json();
     assert.equal('refreshToken' in refreshBody, false);
@@ -123,6 +129,7 @@ test('JWT sessions use typed HS256 tokens, HttpOnly rotating refresh cookies and
         method: 'POST',
         headers: { Cookie: rotatedCookie }
     });
+    await new Promise((resolve) => setImmediate(resolve));
     assert.equal(logoutResponse.status, 204);
     assert.equal(users.records[0].refreshToken, null);
     assert.match(logoutResponse.headers.get('set-cookie'), /Max-Age=0/);
@@ -132,4 +139,13 @@ test('JWT sessions use typed HS256 tokens, HttpOnly rotating refresh cookies and
         headers: { Cookie: rotatedCookie }
     });
     assert.equal(revokedResponse.status, 401);
+    assert.ok(actionRecords.some((record) => (
+        record.action === 'auth.register' && record.user_id === 1
+    )));
+    assert.ok(actionRecords.some((record) => (
+        record.action === 'auth.refresh' && record.user_id === 1
+    )));
+    assert.ok(actionRecords.some((record) => (
+        record.action === 'auth.logout' && record.user_id === 1
+    )));
 });

@@ -4,8 +4,9 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { createHash, createHmac, randomUUID } = require('node:crypto');
+const { createUserActionLogger } = require('./services/userActionLog');
 
-module.exports = (User) => {
+module.exports = (User, UserActionLog) => {
     const router = express.Router();
     const jwtSecret = process.env.JWT_SECRET;
     if (typeof jwtSecret !== 'string' || Buffer.byteLength(jwtSecret, 'utf8') < 32) {
@@ -36,6 +37,7 @@ module.exports = (User) => {
         res.set('Cache-Control', 'no-store');
         next();
     });
+    if (UserActionLog) router.use(createUserActionLogger(UserActionLog, 'auth'));
 
     const hashToken = (token) => createHash('sha256').update(token).digest('hex');
     const getRefreshToken = (req) => {
@@ -125,6 +127,8 @@ module.exports = (User) => {
             username: username.trim(),
             password: await bcrypt.hash(password, 10)
         });
+        res.locals.actionUserId = user.id;
+        res.locals.actionUsername = user.username;
         const tokens = createTokens(user.id);
         await user.update({ refreshToken: hashToken(tokens.refreshToken) });
         setRefreshCookie(res, tokens.refreshToken);
@@ -147,6 +151,8 @@ module.exports = (User) => {
             return res.status(401).json({ error: 'Неверное имя пользователя или пароль' });
         }
 
+        res.locals.actionUserId = user.id;
+        res.locals.actionUsername = user.username;
         const tokens = createTokens(user.id);
         await user.update({ refreshToken: hashToken(tokens.refreshToken) });
         setRefreshCookie(res, tokens.refreshToken);
@@ -168,7 +174,6 @@ module.exports = (User) => {
             clearRefreshCookie(res);
             return res.status(401).json({ error: 'Недействительный или истёкший refresh-токен' });
         }
-
         const userId = Number(payload.sub);
         if (payload.type !== 'refresh' || !Number.isSafeInteger(userId) || userId < 1 || !payload.jti) {
             clearRefreshCookie(res);
@@ -182,6 +187,8 @@ module.exports = (User) => {
             clearRefreshCookie(res);
             return res.status(401).json({ error: 'Недействительный refresh-токен' });
         }
+        res.locals.actionUserId = user.id;
+        res.locals.actionUsername = user.username;
 
         const tokens = createTokens(user.id);
         const [updatedCount] = await User.update(
@@ -208,6 +215,7 @@ module.exports = (User) => {
             }
             const userId = Number(payload.sub);
             if (payload.type === 'refresh' && Number.isSafeInteger(userId) && userId > 0 && payload.jti) {
+                res.locals.actionUserId = userId;
                 await User.update(
                     { refreshToken: null },
                     { where: { id: userId, refreshToken: hashToken(refreshToken) } }
