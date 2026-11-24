@@ -62,10 +62,6 @@ p { color: var(--muted); line-height: 1.65; }
 .item-card { align-self: start; display: flex; flex-direction: column; grid-row-end: span 1; margin-bottom: 18px; min-width: 0; }
 .item-card h3, .item-card p { min-width: 0; overflow-wrap: anywhere; }
 .item-card p { white-space: pre-wrap; }
-.description-expander { min-width: 0; overflow-wrap: anywhere; }
-.description-expander summary { color: var(--muted); cursor: pointer; line-height: 1.65; overflow-wrap: anywhere; white-space: pre-wrap; }
-.description-expander summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.description-expander > p { margin-top: 12px; }
 .text-link { color: var(--accent-dark); font-weight: 700; text-decoration: none; }
 .back-link { display: inline-block; margin-bottom: 28px; }
 .detail-card { max-width: 760px; min-width: 0; }

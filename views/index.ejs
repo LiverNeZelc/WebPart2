@@ -22,11 +22,8 @@
             <article class="item-card">
                 <span class="tag"><%= item.type %></span>
                 <h3><%= item.name %></h3>
-                <% if (item.description.length > 180) { %>
-                    <details class="description-expander">
-                        <summary><%= item.description.slice(0, 180).trimEnd() %><span aria-hidden="true">…</span></summary>
-                        <p><%= item.description %></p>
-                    </details>
+                <% if (item.description.length > 90) { %>
+                    <p><%= item.description.slice(0, 90).trimEnd() %>…</p>
                 <% } else { %>
                     <p><%= item.description %></p>
                 <% } %>
